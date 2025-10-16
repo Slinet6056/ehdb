@@ -75,6 +75,15 @@ CREATE TABLE torrent (
 -- Step 3: Convert and import gallery data
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+-- Create temporary indexes for better performance
+CREATE INDEX IF NOT EXISTS temp_idx_gid_tid_gid ON e_hentai_db.gid_tid(gid);
+CREATE INDEX IF NOT EXISTS temp_idx_tag_id ON e_hentai_db.tag(id);
+
+-- Analyze tables to update statistics
+ANALYZE e_hentai_db.gallery;
+ANALYZE e_hentai_db.gid_tid;
+ANALYZE e_hentai_db.tag;
+
 INSERT INTO gallery (
     gid, token, archiver_key, title, title_jpn, category, thumb, uploader,
     posted, filecount, filesize, expunged, removed, replaced, rating,
@@ -99,14 +108,16 @@ SELECT
     g.torrentcount,
     g.root_gid,
     g.bytorrent != 0,
-    COALESCE(
-        (SELECT jsonb_agg(t.name ORDER BY t.name)
-         FROM e_hentai_db.gid_tid gt
-         INNER JOIN e_hentai_db.tag t ON gt.tid = t.id
-         WHERE gt.gid = g.gid),
-        '[]'::jsonb
-    ) AS tags
+    COALESCE(tag_agg.tags, '[]'::jsonb) AS tags
 FROM e_hentai_db.gallery g
+LEFT JOIN (
+    SELECT
+        gt.gid,
+        jsonb_agg(t.name ORDER BY t.name) AS tags
+    FROM e_hentai_db.gid_tid gt
+    INNER JOIN e_hentai_db.tag t ON gt.tid = t.id
+    GROUP BY gt.gid
+) tag_agg ON tag_agg.gid = g.gid
 ORDER BY g.gid;
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
