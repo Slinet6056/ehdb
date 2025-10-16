@@ -122,28 +122,54 @@ jobs:
       - name: Generate statistics
         run: |
           echo "Generating database statistics..."
-          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} << EOF > migration_stats.txt
-          \echo '=== Database Statistics ==='
-          \echo ''
-          \echo 'Total galleries:'
-          SELECT COUNT(*) FROM gallery;
-          \echo ''
-          \echo 'Active galleries (not expunged):'
-          SELECT COUNT(*) FROM gallery WHERE expunged = FALSE;
-          \echo ''
-          \echo 'Total tags:'
-          SELECT COUNT(*) FROM tag;
-          \echo ''
-          \echo 'Total torrents:'
-          SELECT COUNT(*) FROM torrent;
-          \echo ''
-          \echo 'Category statistics:'
-          SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;
-          \echo ''
-          \echo 'Database size:'
-          SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));
+
+          # Collect statistics data
+          TOTAL_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery;" | xargs)
+
+          ACTIVE_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery WHERE expunged = FALSE;" | xargs)
+
+          TOTAL_TAGS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM tag;" | xargs)
+
+          TOTAL_TORRENTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM torrent;" | xargs)
+
+          DB_SIZE=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));" | xargs)
+
+          # Generate markdown formatted statistics report
+          cat > migration_stats.txt << EOF
+          ## 📊 Database Statistics
+
+          ### 📈 Overview
+
+          | Metric | Count |
+          |--------|-------|
+          | Total Galleries | ${TOTAL_GALLERIES} |
+          | Active Galleries (Not Expunged) | ${ACTIVE_GALLERIES} |
+          | Total Tags | ${TOTAL_TAGS} |
+          | Total Torrents | ${TOTAL_TORRENTS} |
+          | Database Size | ${DB_SIZE} |
+
+          ### 📂 Category Breakdown
+
+          | Category | Count |
+          |----------|-------|
           EOF
+
+          # Add category statistics
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -A -F'|' \
+            -c "SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
+            | while IFS='|' read -r category count; do
+              echo "| ${category} | ${count} |" >> migration_stats.txt
+            done
+
+          echo "" >> migration_stats.txt
+          echo "---" >> migration_stats.txt
+          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> migration_stats.txt
 
           cat migration_stats.txt
 
