@@ -102,7 +102,7 @@ jobs:
           EOF
 
           echo "Starting pgloader migration..."
-          pgloader pgloader.conf
+          pgloader --dynamic-space-size 4096 pgloader.conf
 
       - name: Run post-migration script
         run: |
