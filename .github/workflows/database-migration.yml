@@ -1,0 +1,167 @@
+name: Database Migration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 11 * * *"
+
+env:
+  MYSQL_DATABASE: e_hentai_db
+  MYSQL_ROOT_PASSWORD: kUbjba7gm247RvBb7TzG
+  POSTGRES_DATABASE: ehentai_db
+  POSTGRES_PASSWORD: LNbzXrnuo2xx9d4PNRgj
+  POSTGRES_USER: root
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mariadb:11
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
+          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
+        options: >-
+          --health-cmd="mariadb-admin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 3306:3306
+
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DATABASE }}
+        options: >-
+          --health-cmd="pg_isready -U $POSTGRES_USER"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget zstd postgresql-client mysql-client pgloader
+
+      - name: Download latest database dump
+        run: |
+          # Download latest nightly.sql.zstd from URenko/e-hentai-db
+          echo "Downloading nightly database dump..."
+          wget -O nightly.sql.zstd "https://github.com/URenko/e-hentai-db/releases/download/nightly/nightly.sql.zstd"
+
+          # Extract
+          echo "Extracting database file..."
+          zstd -d nightly.sql.zstd -o nightly.sql
+
+      - name: Import data to MySQL
+        run: |
+          echo "Importing data to MySQL..."
+          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} < nightly.sql
+
+      - name: Run pre-migration script
+        run: |
+          echo "Running pre-migration cleanup script..."
+          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} \
+            < migration/pre_migration.sql
+
+      - name: Configure and run pgloader
+        run: |
+          # Create configuration file
+          cat > pgloader.conf << EOF
+          LOAD DATABASE
+              FROM mysql://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
+              INTO postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@127.0.0.1:5432/${{ env.POSTGRES_DATABASE }}
+
+          WITH include drop, create tables, create indexes, reset sequences,
+               workers = 4, concurrency = 2,
+               multiple readers per thread, rows per range = 50000
+
+          SET MySQL PARAMETERS
+              net_read_timeout  = '120',
+              net_write_timeout = '120'
+
+          SET PostgreSQL PARAMETERS
+              maintenance_work_mem to '512MB',
+              work_mem to '128MB'
+
+          CAST type int when (= precision 11) to integer drop typemod,
+               type bigint when (= precision 20) to bigint drop typemod,
+               type tinyint when (= precision 1) to smallint drop typemod,
+               type char to varchar drop typemod,
+               type varchar to text drop typemod;
+          EOF
+
+          echo "Starting pgloader migration..."
+          pgloader pgloader.conf
+
+      - name: Run post-migration script
+        run: |
+          echo "Running post-migration script..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -f migration/post_migration.sql
+
+      - name: Export PostgreSQL database
+        run: |
+          echo "Exporting PostgreSQL database..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_dump -h 127.0.0.1 -Fc -Z "zstd" \
+            -U ${{ env.POSTGRES_USER }} -f ehentai_db.dump ${{ env.POSTGRES_DATABASE }}
+
+          # Calculate checksum
+          sha256sum ehentai_db.dump > ehentai_db.dump.sha256
+
+      - name: Generate statistics
+        run: |
+          echo "Generating database statistics..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} << EOF > migration_stats.txt
+          \echo '=== Database Statistics ==='
+          \echo ''
+          \echo 'Total galleries:'
+          SELECT COUNT(*) FROM gallery;
+          \echo ''
+          \echo 'Active galleries (not expunged):'
+          SELECT COUNT(*) FROM gallery WHERE expunged = FALSE;
+          \echo ''
+          \echo 'Total tags:'
+          SELECT COUNT(*) FROM tag;
+          \echo ''
+          \echo 'Total torrents:'
+          SELECT COUNT(*) FROM torrent;
+          \echo ''
+          \echo 'Category statistics:'
+          SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;
+          \echo ''
+          \echo 'Database size:'
+          SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));
+          EOF
+
+          cat migration_stats.txt
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Database Migration
+          body_path: migration_stats.txt
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            ehentai_db.dump
+            ehentai_db.dump.sha256
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f nightly.sql nightly.sql.zstd pgloader.conf
+          echo "Cleanup completed"
