@@ -116,9 +116,6 @@ jobs:
           PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_dump -h 127.0.0.1 -Fc -Z "zstd" \
             -U ${{ env.POSTGRES_USER }} -f ehentai_db.dump ${{ env.POSTGRES_DATABASE }}
 
-          # Calculate checksum
-          sha256sum ehentai_db.dump > ehentai_db.dump.sha256
-
       - name: Generate statistics
         run: |
           echo "Generating database statistics..."
@@ -184,7 +181,6 @@ jobs:
           make_latest: true
           files: |
             ehentai_db.dump
-            ehentai_db.dump.sha256
           token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
 
       - name: Cleanup

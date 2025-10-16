@@ -5,7 +5,7 @@ This guide describes how to migrate E-Hentai database from MySQL/MariaDB to Post
 ## Prerequisites
 
 - MySQL/MariaDB
-- PostgreSQL 16+
+- PostgreSQL
 - [pgloader](https://github.com/dimitri/pgloader)
 - Database dump file from [URenko/e-hentai-db releases](https://github.com/URenko/e-hentai-db/releases)
 
