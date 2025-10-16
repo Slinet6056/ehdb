@@ -159,6 +159,7 @@ jobs:
           files: |
             ehentai_db.dump
             ehentai_db.dump.sha256
+          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
 
       - name: Cleanup
         if: always()
