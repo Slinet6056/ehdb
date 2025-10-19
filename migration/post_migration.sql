@@ -163,6 +163,7 @@ CREATE INDEX idx_gallery_root_gid ON gallery (root_gid) WHERE root_gid IS NOT NU
 CREATE INDEX idx_gallery_rating ON gallery (rating);
 
 CREATE INDEX idx_gallery_category_exp_posted ON gallery (category, expunged, posted DESC);
+CREATE INDEX idx_gallery_exp_posted_gid ON gallery (expunged, posted DESC, gid DESC);
 CREATE INDEX idx_gallery_uploader_exp_posted ON gallery (uploader, expunged, posted DESC) WHERE uploader IS NOT NULL;
 CREATE INDEX idx_gallery_exp_removed_replaced ON gallery (expunged, removed, replaced);
 
@@ -173,7 +174,7 @@ CREATE INDEX idx_tag_name_trgm ON tag USING GIN (name gin_trgm_ops);
 
 -- Torrent table indexes
 CREATE INDEX idx_torrent_gid ON torrent (gid);
-CREATE INDEX idx_torrent_hash ON torrent (hash) WHERE hash IS NOT NULL;
+-- CREATE INDEX idx_torrent_hash ON torrent (hash) WHERE hash IS NOT NULL;
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- Step 7: Create materialized views
@@ -656,7 +657,7 @@ COMMIT;
 -- 2. Test time range query:
 --    SELECT * FROM gallery WHERE posted > NOW() - INTERVAL '30 days' LIMIT 10;
 --
--- 3. Test fast title search (recommended, supports multi-word search, millisecond-level):
+-- 3. Test fast title search (recommended, supports multi-word search):
 --    -- Single word search (returns all results)
 --    SELECT * FROM search_gallery_title('狡兔屋');
 --
