@@ -1,0 +1,46 @@
+database:
+  host: localhost
+  port: 5432
+  user: user
+  password: password
+  dbname: ehentai_db
+  sslmode: disable
+
+api:
+  port: 8880
+  debug: false # Enable debug mode (shows detailed Gin logs)
+  cors: true
+  cors_origin: "*"
+  # Query limits for different API endpoints
+  limits:
+    category_max_limit: 25    # Maximum limit for category queries
+    search_max_limit: 25      # Maximum limit for search queries
+    list_max_limit: 25        # Maximum limit for list queries
+    uploader_max_limit: 25    # Maximum limit for uploader queries
+    tag_max_limit: 25         # Maximum limit for tag queries
+
+# Log level: debug, info, warn, error, fatal (default: info)
+log_level: info
+
+crawler:
+  # e-hentai.org or exhentai.org
+  host: e-hentai.org
+  # Cookie string
+  cookies: ""
+  # Proxy URL: http://proxy:port or socks5://proxy:port
+  proxy: ""
+  # Number of retry attempts
+  retry_times: 3
+
+scheduler:
+  # Gallery sync
+  gallery_sync_cron: "0 * * * *"
+  gallery_sync_enabled: true
+  gallery_sync_offset: 0
+  # Torrent sync
+  torrent_sync_cron: "5 * * * *"
+  torrent_sync_enabled: true
+  # Resync
+  resync_cron: "0 2 * * *"
+  resync_enabled: false
+  resync_hours: 24
