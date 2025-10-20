@@ -35,6 +35,6 @@ USER ehdb
 EXPOSE 8880
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8880/ || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8880/health || exit 1
 
 CMD ["./ehdb-api", "-config", "/app/config.yaml", "-scheduler"]

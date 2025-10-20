@@ -72,8 +72,12 @@ func main() {
 
 	// Setup routes
 	router.GET("/", func(c *gin.Context) {
-		// Serve sadpanda.jpg if exists
-		c.File("reference/api/assets/sadpanda.jpg")
+		c.String(http.StatusOK, "ehdb-api is running")
+	})
+
+	// Health check endpoint (no logging)
+	router.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
 	})
 
 	api := router.Group("/api")

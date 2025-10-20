@@ -15,6 +15,12 @@ func GinZap(logger *zap.Logger) gin.HandlerFunc {
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
 
+		// Skip logging for health check endpoint
+		if path == "/health" {
+			c.Next()
+			return
+		}
+
 		// Process request
 		c.Next()
 
