@@ -161,6 +161,7 @@ CREATE INDEX idx_gallery_category ON gallery (category);
 CREATE INDEX idx_gallery_uploader ON gallery (uploader) WHERE uploader IS NOT NULL;
 CREATE INDEX idx_gallery_root_gid ON gallery (root_gid) WHERE root_gid IS NOT NULL;
 CREATE INDEX idx_gallery_rating ON gallery (rating);
+CREATE INDEX idx_gallery_filecount ON gallery (filecount);
 
 CREATE INDEX idx_gallery_category_exp_posted ON gallery (category, expunged, posted DESC);
 CREATE INDEX idx_gallery_exp_posted_gid ON gallery (expunged, posted DESC, gid DESC);

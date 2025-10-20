@@ -65,7 +65,7 @@ func main() {
 	// Initialize handlers
 	galleryHandler := handler.NewGalleryHandler(log)
 	listHandler := handler.NewListHandler(log)
-	// searchHandler := handler.NewSearchHandler(log)
+	searchHandler := handler.NewSearchHandler(log)
 	tagHandler := handler.NewTagHandler(log)
 	categoryHandler := handler.NewCategoryHandler(log)
 	uploaderHandler := handler.NewUploaderHandler(log)
@@ -90,7 +90,7 @@ func main() {
 		api.GET("/list", listHandler.GetList)
 
 		// Search route
-		// api.GET("/search", searchHandler.Search)
+		api.GET("/search", searchHandler.Search)
 
 		// Tag routes
 		api.GET("/tag/:tag", tagHandler.GetByTag)
