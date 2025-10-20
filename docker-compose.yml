@@ -1,0 +1,52 @@
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:16-alpine
+    container_name: ehdb-postgres
+    environment:
+      POSTGRES_DB: ehentai_db
+      POSTGRES_USER: ehdb
+      POSTGRES_PASSWORD: ehdb_password
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Mount database dump if needed
+      - ./database.dump:/var/lib/postgresql/data/database.dump:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - ehdb-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ehdb -d ehentai_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # API server with scheduler
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ehdb-api
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      # Mount config file
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "8880:8880"
+    networks:
+      - ehdb-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  ehdb-network:
+    driver: bridge

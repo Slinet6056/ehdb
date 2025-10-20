@@ -1,0 +1,44 @@
+# Git related
+.git
+.gitignore
+
+# Build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and coverage
+*.test
+*.out
+coverage.out
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+LICENSE
+
+# Config files (config.yaml contains sensitive info)
+config.yaml
+
+# Temporary files
+*.tmp
+*.log
+
+# Docker related
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Migration scripts
+migration/
+
+# Just file
+justfile
