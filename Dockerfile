@@ -9,7 +9,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ehdb-api cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ehdb-api cmd/api/main.go && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ehdb-sync cmd/sync/main.go
 
 FROM alpine:latest
 
@@ -23,6 +24,7 @@ RUN addgroup -g 1000 ehdb && \
 WORKDIR /app
 
 COPY --from=builder /build/ehdb-api .
+COPY --from=builder /build/ehdb-sync .
 
 COPY config.example.yaml ./
 
