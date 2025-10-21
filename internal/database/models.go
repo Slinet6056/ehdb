@@ -1,8 +1,19 @@
 package database
 
 import (
+	"encoding/json"
 	"time"
 )
+
+// UnixTime wraps time.Time to marshal as Unix timestamp
+type UnixTime struct {
+	time.Time
+}
+
+// MarshalJSON converts time to Unix timestamp
+func (t UnixTime) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.Unix())
+}
 
 // Gallery represents a gallery record
 type Gallery struct {
@@ -14,7 +25,7 @@ type Gallery struct {
 	Category     string    `json:"category"`
 	Thumb        string    `json:"thumb"`
 	Uploader     *string   `json:"uploader"`
-	Posted       time.Time `json:"posted"`
+	Posted       UnixTime  `json:"posted"`
 	Filecount    int       `json:"filecount"`
 	Filesize     int64     `json:"filesize"`
 	Expunged     bool      `json:"expunged"`

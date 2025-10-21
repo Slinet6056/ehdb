@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/slinet/ehdb/internal/config"
@@ -164,9 +165,10 @@ func (h *TagHandler) GetByTag(c *gin.Context) {
 
 	for rows.Next() {
 		var g database.Gallery
+		var postedTime time.Time
 		err := rows.Scan(
 			&g.Gid, &g.Token, &g.ArchiverKey, &g.Title, &g.TitleJpn,
-			&g.Category, &g.Thumb, &g.Uploader, &g.Posted, &g.Filecount,
+			&g.Category, &g.Thumb, &g.Uploader, &postedTime, &g.Filecount,
 			&g.Filesize, &g.Expunged, &g.Removed, &g.Replaced, &g.Rating,
 			&g.Torrentcount, &g.RootGid, &g.Bytorrent, &g.Tags,
 		)
@@ -174,6 +176,7 @@ func (h *TagHandler) GetByTag(c *gin.Context) {
 			h.logger.Error("failed to scan gallery", zap.Error(err))
 			continue
 		}
+		g.Posted = database.UnixTime{Time: postedTime}
 		galleries = append(galleries, g)
 		if g.RootGid != nil {
 			rootGids = append(rootGids, *g.RootGid)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/slinet/ehdb/internal/config"
@@ -41,6 +42,8 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	minPageParam := c.DefaultQuery("minpage", "0")
 	maxPageParam := c.DefaultQuery("maxpage", "0")
 	minRatingParam := c.DefaultQuery("minrating", "0")
+	maxDateParam := c.Query("maxdate")
+	minDateParam := c.Query("mindate")
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	cursor := c.Query("cursor")
@@ -69,6 +72,15 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	}
 	if minRating > 5 {
 		minRating = 5
+	}
+
+	// Parse date range parameters (Unix timestamps)
+	var maxDate, minDate int64
+	if maxDateParam != "" {
+		maxDate, _ = strconv.ParseInt(maxDateParam, 10, 64)
+	}
+	if minDateParam != "" {
+		minDate, _ = strconv.ParseInt(minDateParam, 10, 64)
 	}
 
 	// Parse cursor for cursor-based pagination
@@ -198,6 +210,18 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	if minRating > 0 {
 		conditions = append(conditions, fmt.Sprintf("rating >= $%d", argIndex))
 		args = append(args, minRating)
+		argIndex++
+	}
+
+	// Date range conditions
+	if maxDate > 0 {
+		conditions = append(conditions, fmt.Sprintf("posted <= to_timestamp($%d)", argIndex))
+		args = append(args, maxDate)
+		argIndex++
+	}
+	if minDate > 0 {
+		conditions = append(conditions, fmt.Sprintf("posted >= to_timestamp($%d)", argIndex))
+		args = append(args, minDate)
 		argIndex++
 	}
 
@@ -415,9 +439,10 @@ func (h *SearchHandler) Search(c *gin.Context) {
 
 	for rows.Next() {
 		var g database.Gallery
+		var postedTime time.Time
 		err := rows.Scan(
 			&g.Gid, &g.Token, &g.ArchiverKey, &g.Title, &g.TitleJpn,
-			&g.Category, &g.Thumb, &g.Uploader, &g.Posted, &g.Filecount,
+			&g.Category, &g.Thumb, &g.Uploader, &postedTime, &g.Filecount,
 			&g.Filesize, &g.Expunged, &g.Removed, &g.Replaced, &g.Rating,
 			&g.Torrentcount, &g.RootGid, &g.Bytorrent, &g.Tags,
 		)
@@ -425,6 +450,7 @@ func (h *SearchHandler) Search(c *gin.Context) {
 			h.logger.Error("failed to scan gallery", zap.Error(err))
 			continue
 		}
+		g.Posted = database.UnixTime{Time: postedTime}
 		galleries = append(galleries, g)
 		if g.RootGid != nil {
 			rootGids = append(rootGids, *g.RootGid)
@@ -483,6 +509,17 @@ func (h *SearchHandler) Search(c *gin.Context) {
 		if minRating > 0 {
 			countConditions = append(countConditions, fmt.Sprintf("rating >= $%d", countArgIndex))
 			countArgsTemp = append(countArgsTemp, minRating)
+			countArgIndex++
+		}
+		// Date range conditions for count
+		if maxDate > 0 {
+			countConditions = append(countConditions, fmt.Sprintf("posted <= to_timestamp($%d)", countArgIndex))
+			countArgsTemp = append(countArgsTemp, maxDate)
+			countArgIndex++
+		}
+		if minDate > 0 {
+			countConditions = append(countConditions, fmt.Sprintf("posted >= to_timestamp($%d)", countArgIndex))
+			countArgsTemp = append(countArgsTemp, minDate)
 			countArgIndex++
 		}
 		// Tags condition for count (same logic as main query)

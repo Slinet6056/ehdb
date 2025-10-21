@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -59,13 +60,15 @@ func (h *GalleryHandler) GetGallery(c *gin.Context) {
 	)
 
 	var gallery database.Gallery
+	var postedTime time.Time
 	err := pool.QueryRow(ctx, query, gid, token).Scan(
 		&gallery.Gid, &gallery.Token, &gallery.ArchiverKey, &gallery.Title,
 		&gallery.TitleJpn, &gallery.Category, &gallery.Thumb, &gallery.Uploader,
-		&gallery.Posted, &gallery.Filecount, &gallery.Filesize, &gallery.Expunged,
+		&postedTime, &gallery.Filecount, &gallery.Filesize, &gallery.Expunged,
 		&gallery.Removed, &gallery.Replaced, &gallery.Rating, &gallery.Torrentcount,
 		&gallery.RootGid, &gallery.Bytorrent, &gallery.Tags,
 	)
+	gallery.Posted = database.UnixTime{Time: postedTime}
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
