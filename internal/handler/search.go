@@ -724,7 +724,6 @@ func (h *SearchHandler) expandTagPrefixesGrouped(ctx context.Context, prefixes [
 			SELECT name
 			FROM tag
 			WHERE name LIKE $1
-			LIMIT 100
 		`
 		pattern := prefix + "%"
 
@@ -775,7 +774,6 @@ func (h *SearchHandler) expandSingleTagPrefix(ctx context.Context, prefix string
 		SELECT name
 		FROM tag
 		WHERE name LIKE $1
-		LIMIT 100
 	`
 	pattern := prefix + "%"
 

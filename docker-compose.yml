@@ -1,7 +1,7 @@
 services:
   # PostgreSQL database
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17
     container_name: ehdb-postgres
     environment:
       POSTGRES_DB: ehentai_db
@@ -25,9 +25,7 @@ services:
 
   # API server with scheduler
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/slinet6056/ehdb:master
     container_name: ehdb-api
     environment:
       TZ: Asia/Shanghai

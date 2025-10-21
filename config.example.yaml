@@ -1,8 +1,8 @@
 database:
   host: localhost
   port: 5432
-  user: user
-  password: password
+  user: ehdb
+  password: ehdb_password
   dbname: ehentai_db
   sslmode: disable
 
