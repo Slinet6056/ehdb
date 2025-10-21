@@ -138,6 +138,23 @@ jobs:
 
           # Generate markdown formatted statistics report
           cat > migration_stats.txt << EOF
+          ## 📦 Database Import
+
+          \`\`\`bash
+          # 1. Download the database dump
+          wget https://github.com/Slinet6056/ehdb/releases/download/nightly/ehentai_db.dump
+
+          # 2. Create database (if not exists)
+          createdb -U postgres ehentai_db
+
+          # 3. Import the database
+          pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
+          \`\`\`
+
+          **Note: PostgreSQL 16 or later is required (for zstd compression support).**
+
+          ---
+
           ## 📊 Database Statistics
 
           ### 📈 Overview
