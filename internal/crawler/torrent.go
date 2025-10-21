@@ -22,6 +22,7 @@ type TorrentCrawler struct {
 	maxPages   int
 	statusCode string
 	search     string
+	retryTimes int
 }
 
 // TorrentCrawlerOptions contains optional parameters for torrent crawler
@@ -45,6 +46,7 @@ func NewTorrentCrawler(cfg *config.CrawlerConfig, logger *zap.Logger) (*TorrentC
 		maxPages:   0, // 0 means no limit
 		statusCode: "",
 		search:     "",
+		retryTimes: cfg.RetryTimes,
 	}, nil
 }
 
@@ -97,7 +99,12 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 	for !finished {
 		c.logger.Debug("fetching torrent list page", zap.Int("page", page))
 
-		pageItems, err := c.fetchTorrentListPage(page)
+		pageItems, err := Retry(RetryConfig{
+			MaxRetries: c.retryTimes,
+			Logger:     c.logger,
+		}, func() ([]TorrentListItem, error) {
+			return c.fetchTorrentListPage(page)
+		})
 		if err != nil {
 			return fmt.Errorf("fetch page %d: %w", page, err)
 		}
@@ -196,7 +203,12 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 	for gid := range gidMap {
 		token := gidMap[gid][0].Token
 
-		count, err := c.processTorrentsForGallery(ctx, gid, token)
+		count, err := Retry(RetryConfig{
+			MaxRetries: c.retryTimes,
+			Logger:     c.logger,
+		}, func() (int, error) {
+			return c.processTorrentsForGallery(ctx, gid, token)
+		})
 		if err != nil {
 			c.logger.Error("failed to process gallery torrents", zap.Int("gid", gid), zap.Error(err))
 			continue
@@ -406,7 +418,10 @@ func (c *TorrentCrawler) importMissingGalleries(ctx context.Context, items []Tor
 		batch := gidlist[i:end]
 		c.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
-		metadata, err := c.retryFetchMetadata(func() ([]database.GalleryMetadata, error) {
+		metadata, err := Retry(RetryConfig{
+			MaxRetries: c.retryTimes,
+			Logger:     c.logger,
+		}, func() ([]database.GalleryMetadata, error) {
 			return c.GetMetadatas(batch)
 		})
 
@@ -442,23 +457,6 @@ func (c *TorrentCrawler) GetMetadatas(gidlist [][2]interface{}) ([]database.Gall
 		logger: c.logger,
 	}
 	return gc.GetMetadatas(gidlist)
-}
-
-// retryFetchMetadata retries fetching metadata with exponential backoff
-func (c *TorrentCrawler) retryFetchMetadata(fn func() ([]database.GalleryMetadata, error)) ([]database.GalleryMetadata, error) {
-	maxRetries := 3
-	for i := 0; i < maxRetries; i++ {
-		result, err := fn()
-		if err == nil {
-			return result, nil
-		}
-
-		c.logger.Warn("fetch metadata failed, retrying", zap.Int("attempt", i+1), zap.Error(err))
-		if i < maxRetries-1 {
-			time.Sleep(time.Duration(i+1) * time.Second)
-		}
-	}
-	return nil, fmt.Errorf("exceeded maximum retry attempts")
 }
 
 // Database helper functions

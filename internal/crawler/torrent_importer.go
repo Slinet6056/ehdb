@@ -16,9 +16,10 @@ import (
 
 // TorrentImporter imports torrents from all galleries
 type TorrentImporter struct {
-	client *Client
-	cfg    *config.CrawlerConfig
-	logger *zap.Logger
+	client     *Client
+	cfg        *config.CrawlerConfig
+	logger     *zap.Logger
+	retryTimes int
 }
 
 // NewTorrentImporter creates a new torrent importer
@@ -29,9 +30,10 @@ func NewTorrentImporter(cfg *config.CrawlerConfig, logger *zap.Logger) (*Torrent
 	}
 
 	return &TorrentImporter{
-		client: client,
-		cfg:    cfg,
-		logger: logger,
+		client:     client,
+		cfg:        cfg,
+		logger:     logger,
+		retryTimes: cfg.RetryTimes,
 	}, nil
 }
 
@@ -86,7 +88,12 @@ func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 	newTorrents := 0
 
 	for _, g := range galleries {
-		count, err := ti.processGallery(ctx, g.Gid, g.Token, g.Posted)
+		count, err := Retry(RetryConfig{
+			MaxRetries: ti.retryTimes,
+			Logger:     ti.logger,
+		}, func() (int, error) {
+			return ti.processGallery(ctx, g.Gid, g.Token, g.Posted)
+		})
 		if err != nil {
 			ti.logger.Error("failed to process gallery", zap.Int("gid", g.Gid), zap.Error(err))
 		} else {

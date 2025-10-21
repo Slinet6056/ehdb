@@ -670,53 +670,6 @@ func (h *SearchHandler) Search(c *gin.Context) {
 	c.JSON(200, utils.GetResponseWithCursor(galleries, 200, "success", &total, &nextCursor))
 }
 
-// expandTagPrefixes queries tag table to find all tags matching the given prefixes
-func (h *SearchHandler) expandTagPrefixes(ctx context.Context, prefixes []string) ([]string, error) {
-	pool := database.GetPool()
-
-	var expandedTags []string
-	for _, prefix := range prefixes {
-		// Query tag table for tags starting with the prefix
-		query := `
-			SELECT name
-			FROM tag
-			WHERE name LIKE $1
-			LIMIT 100
-		`
-		pattern := prefix + "%"
-
-		h.logger.Debug("expanding tag prefix",
-			zap.String("prefix", prefix),
-			zap.String("pattern", pattern),
-		)
-
-		rows, err := pool.Query(ctx, query, pattern)
-		if err != nil {
-			h.logger.Error("failed to query tags", zap.Error(err))
-			return nil, err
-		}
-
-		var count int
-		for rows.Next() {
-			var tagName string
-			if err := rows.Scan(&tagName); err != nil {
-				h.logger.Error("failed to scan tag", zap.Error(err))
-				continue
-			}
-			expandedTags = append(expandedTags, tagName)
-			count++
-		}
-		rows.Close()
-
-		h.logger.Debug("expanded tag prefix",
-			zap.String("prefix", prefix),
-			zap.Int("matches", count),
-		)
-	}
-
-	return expandedTags, nil
-}
-
 // expandTagPrefixesGrouped queries tag table and returns grouped results
 // Returns: map[prefix][]tags and hasUnmatchedPrefixes flag
 func (h *SearchHandler) expandTagPrefixesGrouped(ctx context.Context, prefixes []string) (map[string][]string, bool) {

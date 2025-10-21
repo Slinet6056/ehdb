@@ -197,7 +197,10 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 
 		c.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
-		metadata, err := c.retryFetchMetadata(func() ([]database.GalleryMetadata, error) {
+		metadata, err := Retry(RetryConfig{
+			MaxRetries: c.retryTimes,
+			Logger:     c.logger,
+		}, func() ([]database.GalleryMetadata, error) {
 			return c.GetMetadatas(gidlist)
 		})
 
@@ -235,7 +238,10 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 			zap.Int("page", page),
 		)
 
-		items, err := c.retryFetchPages(func() ([]GalleryListItem, error) {
+		items, err := Retry(RetryConfig{
+			MaxRetries: c.retryTimes,
+			Logger:     c.logger,
+		}, func() ([]GalleryListItem, error) {
 			return c.GetPages(next, expunged)
 		})
 
@@ -290,46 +296,6 @@ func (c *GalleryCrawler) parsePostedTime(posted string) (int64, error) {
 
 	// Assume UTC
 	return t.UTC().Unix(), nil
-}
-
-// retryFetchPages retries a page fetch operation
-func (c *GalleryCrawler) retryFetchPages(fn func() ([]GalleryListItem, error)) ([]GalleryListItem, error) {
-	var lastErr error
-	for i := 0; i < c.retryTimes; i++ {
-		result, err := fn()
-		if err == nil {
-			return result, nil
-		}
-
-		lastErr = err
-		c.logger.Warn("fetch failed, retrying", zap.Int("attempt", i+1), zap.Error(err))
-
-		if i < c.retryTimes-1 {
-			time.Sleep(time.Duration(i+1) * time.Second)
-		}
-	}
-
-	return nil, fmt.Errorf("exceeded max retries: %w", lastErr)
-}
-
-// retryFetchMetadata retries a metadata fetch operation
-func (c *GalleryCrawler) retryFetchMetadata(fn func() ([]database.GalleryMetadata, error)) ([]database.GalleryMetadata, error) {
-	var lastErr error
-	for i := 0; i < c.retryTimes; i++ {
-		result, err := fn()
-		if err == nil {
-			return result, nil
-		}
-
-		lastErr = err
-		c.logger.Warn("fetch failed, retrying", zap.Int("attempt", i+1), zap.Error(err))
-
-		if i < c.retryTimes-1 {
-			time.Sleep(time.Duration(i+1) * time.Second)
-		}
-	}
-
-	return nil, fmt.Errorf("exceeded max retries: %w", lastErr)
 }
 
 // logGidRange logs the gid range of a list of gallery items

@@ -91,7 +91,10 @@ func (r *Resyncer) Resync(ctx context.Context, hours int) error {
 
 		r.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
-		metadata, err := r.crawler.retryFetchMetadata(func() ([]database.GalleryMetadata, error) {
+		metadata, err := Retry(RetryConfig{
+			MaxRetries: r.crawler.retryTimes,
+			Logger:     r.logger,
+		}, func() ([]database.GalleryMetadata, error) {
 			return r.crawler.GetMetadatas(gidlist)
 		})
 

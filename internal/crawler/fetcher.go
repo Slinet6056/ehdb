@@ -69,7 +69,10 @@ func (f *Fetcher) Fetch(ctx context.Context, gidTokens []string) error {
 
 		f.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
-		metadata, err := f.crawler.retryFetchMetadata(func() ([]database.GalleryMetadata, error) {
+		metadata, err := Retry(RetryConfig{
+			MaxRetries: f.crawler.retryTimes,
+			Logger:     f.logger,
+		}, func() ([]database.GalleryMetadata, error) {
 			return f.crawler.GetMetadatas(batch)
 		})
 
