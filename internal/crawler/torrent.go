@@ -241,25 +241,24 @@ func (c *TorrentCrawler) fetchTorrentListPage(page int) ([]TorrentListItem, erro
 	}
 
 	// Parse torrent items
-	// Pattern: gallerytorrents.php?gid=123&t=abc123&gtid=456
-	pattern := regexp.MustCompile(`gallerytorrents\.php\?gid=(\d+)&(?:amp;)?t=([0-9a-f]{10})&(?:amp;)?gtid=(\d+)"`)
-	matches := pattern.FindAllSubmatch(body, -1)
+	firstPattern := regexp.MustCompile(`gallerytorrents\.php\?gid=\d+&(?:amp;)?t=[0-9a-f]{10}&(?:amp;)?gtid=\d+"`)
+	firstMatches := firstPattern.FindAll(body, -1)
+	secondPattern := regexp.MustCompile(`gallerytorrents\.php\?gid=(\d+)&(?:amp;)?t=([0-9a-f]{10})&(?:amp;)?gtid=(\d+)"`)
 
 	var items []TorrentListItem
-	for _, match := range matches {
-		if len(match) < 4 {
-			continue
+	for _, entry := range firstMatches {
+		match := secondPattern.FindSubmatch(entry)
+		if len(match) >= 4 {
+			gid, _ := strconv.Atoi(string(match[1]))
+			token := string(match[2])
+			gtid, _ := strconv.Atoi(string(match[3]))
+
+			items = append(items, TorrentListItem{
+				Gid:   gid,
+				Token: token,
+				Gtid:  gtid,
+			})
 		}
-
-		gid, _ := strconv.Atoi(string(match[1]))
-		token := string(match[2])
-		gtid, _ := strconv.Atoi(string(match[3]))
-
-		items = append(items, TorrentListItem{
-			Gid:   gid,
-			Token: token,
-			Gtid:  gtid,
-		})
 	}
 
 	return items, nil

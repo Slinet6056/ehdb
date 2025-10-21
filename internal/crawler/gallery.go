@@ -59,12 +59,13 @@ func (c *GalleryCrawler) GetPages(next string, expunged bool) ([]GalleryListItem
 	}
 
 	// Parse gallery list from HTML
-	// Pattern: gid=\d+&amp;t=[0-9a-f]{10}&.*?posted_.*?>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}
-	pattern := regexp.MustCompile(`gid=(\d+)&amp;t=([0-9a-f]{10}).*?posted_.*?>(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})<`)
-	matches := pattern.FindAllSubmatch(body, -1)
+	firstPattern := regexp.MustCompile(`gid=\d+&amp;t=[0-9a-f]{10}&.*?posted_.*?>\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}<`)
+	firstMatches := firstPattern.FindAll(body, -1)
+	secondPattern := regexp.MustCompile(`gid=(\d+).*?t=([0-9a-f]{10}).*?>(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})<`)
 
 	var items []GalleryListItem
-	for _, match := range matches {
+	for _, entry := range firstMatches {
+		match := secondPattern.FindSubmatch(entry)
 		if len(match) >= 4 {
 			items = append(items, GalleryListItem{
 				Gid:    string(match[1]),
