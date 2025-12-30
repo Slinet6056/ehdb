@@ -26,24 +26,18 @@ func (rm *ReplacedMarker) MarkReplaced(ctx context.Context) error {
 
 	pool := database.GetPool()
 
-	// SQL logic from markreplaced.js:
-	// UPDATE gallery LEFT JOIN (SELECT root_gid, MAX(gid) AS max_gid, gid FROM gallery GROUP BY IFNULL(root_gid, gid)) AS t
-	// ON gallery.gid = t.max_gid SET gallery.replaced = t.max_gid IS NULL
-
-	// PostgreSQL equivalent:
 	query := `
-		UPDATE gallery
-		SET replaced = (
-			CASE
-				WHEN gid IN (
-					SELECT MAX(gid)
-					FROM gallery
-					GROUP BY COALESCE(root_gid, gid)
-				) THEN false
-				ELSE true
-			END
+		WITH latest_versions AS (
+			SELECT COALESCE(root_gid, gid) AS group_id, MAX(gid) AS max_gid
+			FROM gallery
+			GROUP BY COALESCE(root_gid, gid)
+			HAVING COUNT(*) > 1
 		)
-		WHERE root_gid IS NOT NULL
+		UPDATE gallery g
+		SET replaced = (g.gid != lv.max_gid)
+		FROM latest_versions lv
+		WHERE COALESCE(g.root_gid, g.gid) = lv.group_id
+		  AND g.replaced != (g.gid != lv.max_gid)
 	`
 
 	rm.logger.Debug("executing update query",

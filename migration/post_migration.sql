@@ -170,6 +170,9 @@ CREATE INDEX idx_gallery_exp_removed_replaced ON gallery (expunged, removed, rep
 
 CREATE INDEX idx_gallery_posted_brin ON gallery USING BRIN (posted) WITH (pages_per_range = 128);
 
+CREATE INDEX idx_gallery_root_gid_coalesce ON gallery (COALESCE(root_gid, gid), gid DESC);
+CREATE INDEX idx_gallery_root_gid_replaced ON gallery (root_gid, replaced) WHERE root_gid IS NOT NULL;
+
 -- Tag table indexes
 CREATE INDEX idx_tag_name_trgm ON tag USING GIN (name gin_trgm_ops);
 
