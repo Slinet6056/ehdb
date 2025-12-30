@@ -84,7 +84,7 @@ func (f *Fetcher) Fetch(ctx context.Context, gidTokens []string) error {
 		allMetadata = append(allMetadata, metadata...)
 
 		// Rate limiting
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 
 	f.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))

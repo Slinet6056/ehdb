@@ -41,8 +41,8 @@ func Retry[T any](cfg RetryConfig, fn func() (T, error)) (T, error) {
 
 		// Don't sleep after the last attempt
 		if i < maxRetries-1 {
-			// Exponential backoff: 1s, 2s, 3s, 4s...
-			sleepDuration := time.Duration(i+1) * time.Second
+			// Exponential backoff: 5s, 10s, 15s...
+			sleepDuration := time.Duration((i+1)*5) * time.Second
 			time.Sleep(sleepDuration)
 		}
 	}
@@ -78,8 +78,8 @@ func RetryVoid(cfg RetryConfig, fn func() error) error {
 
 		// Don't sleep after the last attempt
 		if i < maxRetries-1 {
-			// Exponential backoff: 1s, 2s, 3s, 4s...
-			sleepDuration := time.Duration(i+1) * time.Second
+			// Exponential backoff: 5s, 10s, 15s...
+			sleepDuration := time.Duration((i+1)*5) * time.Second
 			time.Sleep(sleepDuration)
 		}
 	}

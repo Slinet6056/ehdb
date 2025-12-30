@@ -101,7 +101,12 @@ func (c *GalleryCrawler) GetMetadatas(gidlist [][2]interface{}) ([]database.Gall
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		// Log response body for debugging
+		preview := string(body)
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		return nil, fmt.Errorf("unmarshal response: %w (response body: %s)", err, preview)
 	}
 
 	return response.Gmetadata, nil
@@ -212,7 +217,7 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 		allMetadata = append(allMetadata, metadata...)
 
 		// Rate limiting
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 
 	c.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))
