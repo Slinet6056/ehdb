@@ -7,7 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.21.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/net v0.48.0
 )
 
