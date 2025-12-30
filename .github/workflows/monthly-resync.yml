@@ -1,0 +1,192 @@
+name: Monthly Deep Resync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "5 14 */30 * *"
+
+concurrency:
+  group: database-sync
+  cancel-in-progress: false
+
+env:
+  POSTGRES_DATABASE: ehentai_db
+  POSTGRES_PASSWORD: BZhvYgYsPMLzqijuf8if
+  POSTGRES_USER: root
+
+jobs:
+  resync:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DATABASE }}
+        options: >-
+          --health-cmd="pg_isready -U root -d postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget postgresql-client
+
+      - name: Download latest database dump
+        run: |
+          echo "Downloading database dump from live release..."
+          wget -O ehentai_db.dump "https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump"
+
+      - name: Import database
+        run: |
+          echo "Importing database..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_restore -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} --no-owner --no-privileges -v ehentai_db.dump
+
+      - name: Build ehdb-sync
+        run: |
+          echo "Building ehdb-sync..."
+          go build -o bin/ehdb-sync ./cmd/sync
+
+      - name: Create config file
+        run: |
+          cat > config.yaml << EOF
+          database:
+            host: 127.0.0.1
+            port: 5432
+            user: ${{ env.POSTGRES_USER }}
+            password: ${{ env.POSTGRES_PASSWORD }}
+            dbname: ${{ env.POSTGRES_DATABASE }}
+            sslmode: disable
+
+          crawler:
+            host: exhentai.org
+            cookies: "${{ secrets.EHENTAI_COOKIES }}"
+            proxy: ""
+            retry_times: 3
+
+          log_level: info
+          EOF
+
+      - name: Resync galleries from last 3 months
+        run: |
+          echo "Resyncing galleries from last 90 days..."
+          ./bin/ehdb-sync resync -config config.yaml -hours 2160
+
+      - name: Mark replaced galleries
+        run: |
+          echo "Marking replaced galleries..."
+          ./bin/ehdb-sync mark-replaced -config config.yaml
+
+      - name: Export PostgreSQL database
+        run: |
+          echo "Exporting PostgreSQL database..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_dump -h 127.0.0.1 -Fc -Z "zstd" \
+            -U ${{ env.POSTGRES_USER }} -f ehentai_db.dump ${{ env.POSTGRES_DATABASE }}
+
+      - name: Generate statistics
+        run: |
+          echo "Generating database statistics..."
+
+          # Collect statistics data
+          TOTAL_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery;" | xargs)
+
+          ACTIVE_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery WHERE expunged = FALSE;" | xargs)
+
+          TOTAL_TAGS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM tag;" | xargs)
+
+          TOTAL_TORRENTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM torrent;" | xargs)
+
+          DB_SIZE=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));" | xargs)
+
+          # Generate markdown formatted statistics report
+          cat > resync_stats.txt << EOF
+          ## 📦 Database Import
+
+          \`\`\`bash
+          # 1. Download the database dump
+          wget https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump
+
+          # 2. Create database (if not exists)
+          createdb -U postgres ehentai_db
+
+          # 3. Import the database
+          pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
+          \`\`\`
+
+          **Note: PostgreSQL 16 or later is required (for zstd compression support).**
+
+          ---
+
+          ## 📊 Database Statistics
+
+          ### 📈 Overview
+
+          | Metric | Count |
+          |--------|-------|
+          | Total Galleries | ${TOTAL_GALLERIES} |
+          | Active Galleries (Not Expunged) | ${ACTIVE_GALLERIES} |
+          | Total Tags | ${TOTAL_TAGS} |
+          | Total Torrents | ${TOTAL_TORRENTS} |
+          | Database Size | ${DB_SIZE} |
+
+          ### 📂 Category Breakdown
+
+          | Category | Count |
+          |----------|-------|
+          EOF
+
+          # Add category statistics
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -A -F'|' \
+            -c "SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
+            | while IFS='|' read -r category count; do
+              echo "| ${category} | ${count} |" >> resync_stats.txt
+            done
+
+          echo "" >> resync_stats.txt
+          echo "---" >> resync_stats.txt
+          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> resync_stats.txt
+          echo "" >> resync_stats.txt
+          echo "**Sync Type:** Monthly Deep Resync (3 months of data)" >> resync_stats.txt
+
+          cat resync_stats.txt
+
+      - name: Update Live Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: live
+          name: Live Sync Database
+          body_path: resync_stats.txt
+          draft: false
+          prerelease: false
+          make_latest: false
+          files: |
+            ehentai_db.dump
+          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ehentai_db.dump config.yaml resync_stats.txt
+          echo "Cleanup completed"
