@@ -100,8 +100,9 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 		c.logger.Debug("fetching torrent list page", zap.Int("page", page))
 
 		pageItems, err := Retry(RetryConfig{
-			MaxRetries: c.retryTimes,
-			Logger:     c.logger,
+			MaxRetries:     c.retryTimes,
+			Logger:         c.logger,
+			WaitForIPUnban: c.cfg.WaitForIPUnban,
 		}, func() ([]TorrentListItem, error) {
 			return c.fetchTorrentListPage(page)
 		})
@@ -205,8 +206,9 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 		token := gidMap[gid][0].Token
 
 		count, err := Retry(RetryConfig{
-			MaxRetries: c.retryTimes,
-			Logger:     c.logger,
+			MaxRetries:     c.retryTimes,
+			Logger:         c.logger,
+			WaitForIPUnban: c.cfg.WaitForIPUnban,
 		}, func() (int, error) {
 			return c.processTorrentsForGallery(ctx, gid, token)
 		})
@@ -429,8 +431,9 @@ func (c *TorrentCrawler) importMissingGalleries(ctx context.Context, items []Tor
 		c.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
 		metadata, err := Retry(RetryConfig{
-			MaxRetries: c.retryTimes,
-			Logger:     c.logger,
+			MaxRetries:     c.retryTimes,
+			Logger:         c.logger,
+			WaitForIPUnban: c.cfg.WaitForIPUnban,
 		}, func() ([]database.GalleryMetadata, error) {
 			return c.GetMetadatas(batch)
 		})

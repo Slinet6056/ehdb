@@ -79,6 +79,7 @@ jobs:
             cookies: "${{ secrets.EHENTAI_COOKIES }}"
             proxy: ""
             retry_times: 3
+            wait_for_ip_unban: true
 
           log_level: info
           EOF

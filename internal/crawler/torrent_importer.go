@@ -89,8 +89,9 @@ func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 
 	for _, g := range galleries {
 		count, err := Retry(RetryConfig{
-			MaxRetries: ti.retryTimes,
-			Logger:     ti.logger,
+			MaxRetries:     ti.retryTimes,
+			Logger:         ti.logger,
+			WaitForIPUnban: ti.cfg.WaitForIPUnban,
 		}, func() (int, error) {
 			return ti.processGallery(ctx, g.Gid, g.Token, g.Posted)
 		})

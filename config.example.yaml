@@ -31,6 +31,8 @@ crawler:
   proxy: ""
   # Number of retry attempts
   retry_times: 3
+  # Whether to wait when IP is temporarily banned (will parse ban duration and wait)
+  wait_for_ip_unban: false
 
 scheduler:
   # Gallery sync
