@@ -196,9 +196,10 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 	}
 
 	// Process all torrents
-	c.logger.Info("processing torrents", zap.Int("galleries", len(gidMap)))
+	c.logger.Info("starting torrent processing", zap.Int("galleries", len(gidMap)))
 	processed := 0
 	newTorrents := 0
+	total := len(gidMap)
 
 	for gid := range gidMap {
 		token := gidMap[gid][0].Token
@@ -216,6 +217,15 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 
 		processed++
 		newTorrents += count
+
+		// Log progress every 100 galleries or at the end
+		if processed%100 == 0 || processed == total {
+			c.logger.Info("processing progress",
+				zap.Int("processed", processed),
+				zap.Int("total", total),
+				zap.Int("new_torrents", newTorrents),
+			)
+		}
 
 		// Rate limiting
 		time.Sleep(1 * time.Second)
@@ -335,7 +345,7 @@ func (c *TorrentCrawler) processTorrentsForGallery(ctx context.Context, gid int,
 				return 0, fmt.Errorf("save torrents: %w", err)
 			}
 			newCount = len(newTorrents)
-			c.logger.Info("saved new torrents", zap.Int("gid", gid), zap.Int("root_gid", rootGid), zap.Int("count", newCount))
+			c.logger.Debug("saved new torrents", zap.Int("gid", gid), zap.Int("root_gid", rootGid), zap.Int("count", newCount))
 		}
 	}
 
