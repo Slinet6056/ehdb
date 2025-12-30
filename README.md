@@ -56,7 +56,28 @@ You need to set up a PostgreSQL database before using EHDB.
 
 #### Import Pre-built Database
 
-Download the latest database dump from [Releases](https://github.com/Slinet6056/ehdb/releases/tag/nightly):
+We provide two types of pre-built database dumps:
+
+**1. Live Sync Database (Recommended)**
+
+Incrementally synchronized database updated every 6 hours with the latest galleries and torrents:
+
+```bash
+# Download the dump file
+wget https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump
+
+# Create database
+createdb -U postgres ehentai_db
+
+# Import (requires PostgreSQL 16+ for zstd compression support)
+pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
+```
+
+> **Note**: The live database is automatically updated every 6 hours via [sync workflow](.github/workflows/sync-database.yml) and deep resynced monthly via [monthly resync workflow](.github/workflows/monthly-resync.yml).
+
+**2. Nightly Migration Database (Alternative)**
+
+Full database migrated from upstream MySQL source, updated daily:
 
 ```bash
 # Download the dump file
@@ -69,7 +90,7 @@ createdb -U postgres ehentai_db
 pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
 ```
 
-> **Note**: The nightly database dump is automatically updated daily via [GitHub Actions](.github/workflows/database-migration.yml).
+> **Note**: The nightly database dump is automatically updated daily via [migration workflow](.github/workflows/database-migration.yml).
 
 #### Migrate from MySQL
 

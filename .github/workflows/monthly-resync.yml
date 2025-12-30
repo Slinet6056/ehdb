@@ -1,35 +1,24 @@
-name: Database Migration
+name: Monthly Deep Resync
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "45 11 * * *"
+    - cron: "5 14 */30 * *"
+
+concurrency:
+  group: database-sync
+  cancel-in-progress: false
 
 env:
-  MYSQL_DATABASE: e_hentai_db
-  MYSQL_ROOT_PASSWORD: kUbjba7gm247RvBb7TzG
   POSTGRES_DATABASE: ehentai_db
-  POSTGRES_PASSWORD: LNbzXrnuo2xx9d4PNRgj
+  POSTGRES_PASSWORD: BZhvYgYsPMLzqijuf8if
   POSTGRES_USER: root
 
 jobs:
-  migrate:
+  resync:
     runs-on: ubuntu-latest
 
     services:
-      mysql:
-        image: mariadb:11
-        env:
-          MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
-          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
-        options: >-
-          --health-cmd="mariadb-admin ping -h localhost"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-        ports:
-          - 3306:3306
-
       postgres:
         image: postgres:16
         env:
@@ -48,67 +37,61 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget zstd postgresql-client mysql-client pgloader
+          sudo apt-get install -y wget postgresql-client
 
       - name: Download latest database dump
         run: |
-          # Download latest nightly.sql.zstd from URenko/e-hentai-db
-          echo "Downloading nightly database dump..."
-          wget -O nightly.sql.zstd "https://github.com/URenko/e-hentai-db/releases/download/nightly/nightly.sql.zstd"
+          echo "Downloading database dump from live release..."
+          wget -O ehentai_db.dump "https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump"
 
-          # Extract
-          echo "Extracting database file..."
-          zstd -d nightly.sql.zstd -o nightly.sql
-
-      - name: Import data to MySQL
+      - name: Import database
         run: |
-          echo "Importing data to MySQL..."
-          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} < nightly.sql
+          echo "Importing database..."
+          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_restore -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} --no-owner --no-privileges -v ehentai_db.dump
 
-      - name: Run pre-migration script
+      - name: Build ehdb-sync
         run: |
-          echo "Running pre-migration cleanup script..."
-          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} \
-            < migration/pre_migration.sql
+          echo "Building ehdb-sync..."
+          go build -o bin/ehdb-sync ./cmd/sync
 
-      - name: Configure and run pgloader
+      - name: Create config file
         run: |
-          # Create configuration file
-          cat > pgloader.conf << EOF
-          LOAD DATABASE
-              FROM mysql://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
-              INTO postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@127.0.0.1:5432/${{ env.POSTGRES_DATABASE }}
+          cat > config.yaml << EOF
+          database:
+            host: 127.0.0.1
+            port: 5432
+            user: ${{ env.POSTGRES_USER }}
+            password: ${{ env.POSTGRES_PASSWORD }}
+            dbname: ${{ env.POSTGRES_DATABASE }}
+            sslmode: disable
 
-          WITH include drop, create tables, create indexes, reset sequences,
-               workers = 4, concurrency = 2,
-               multiple readers per thread, rows per range = 50000
+          crawler:
+            host: exhentai.org
+            cookies: "${{ secrets.EHENTAI_COOKIES }}"
+            proxy: ""
+            retry_times: 3
 
-          SET MySQL PARAMETERS
-              net_read_timeout  = '120',
-              net_write_timeout = '120'
-
-          SET PostgreSQL PARAMETERS
-              maintenance_work_mem to '512MB',
-              work_mem to '128MB'
-
-          CAST type int when (= precision 11) to integer drop typemod,
-               type bigint when (= precision 20) to bigint drop typemod,
-               type tinyint when (= precision 1) to smallint drop typemod,
-               type char to varchar drop typemod,
-               type varchar to text drop typemod;
+          log_level: info
           EOF
 
-          echo "Starting pgloader migration..."
-          pgloader --dynamic-space-size 4096 pgloader.conf
-
-      - name: Run post-migration script
+      - name: Resync galleries from last 3 months
         run: |
-          echo "Running post-migration script..."
-          PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -f migration/post_migration.sql
+          echo "Resyncing galleries from last 90 days..."
+          ./bin/ehdb-sync resync -config config.yaml -hours 2160
+
+      - name: Mark replaced galleries
+        run: |
+          echo "Marking replaced galleries..."
+          ./bin/ehdb-sync mark-replaced -config config.yaml
 
       - name: Export PostgreSQL database
         run: |
@@ -137,12 +120,12 @@ jobs:
             -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));" | xargs)
 
           # Generate markdown formatted statistics report
-          cat > migration_stats.txt << EOF
+          cat > resync_stats.txt << EOF
           ## 📦 Database Import
 
           \`\`\`bash
           # 1. Download the database dump
-          wget https://github.com/Slinet6056/ehdb/releases/download/nightly/ehentai_db.dump
+          wget https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump
 
           # 2. Create database (if not exists)
           createdb -U postgres ehentai_db
@@ -178,24 +161,26 @@ jobs:
             -d ${{ env.POSTGRES_DATABASE }} -t -A -F'|' \
             -c "SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
             | while IFS='|' read -r category count; do
-              echo "| ${category} | ${count} |" >> migration_stats.txt
+              echo "| ${category} | ${count} |" >> resync_stats.txt
             done
 
-          echo "" >> migration_stats.txt
-          echo "---" >> migration_stats.txt
-          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> migration_stats.txt
+          echo "" >> resync_stats.txt
+          echo "---" >> resync_stats.txt
+          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> resync_stats.txt
+          echo "" >> resync_stats.txt
+          echo "**Sync Type:** Monthly Deep Resync (3 months of data)" >> resync_stats.txt
 
-          cat migration_stats.txt
+          cat resync_stats.txt
 
-      - name: Create Release and Upload Assets
+      - name: Update Live Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: Nightly Database Migration
-          body_path: migration_stats.txt
+          tag_name: live
+          name: Live Sync Database
+          body_path: resync_stats.txt
           draft: false
           prerelease: false
-          make_latest: true
+          make_latest: false
           files: |
             ehentai_db.dump
           token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
@@ -203,5 +188,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -f nightly.sql nightly.sql.zstd pgloader.conf
+          rm -f ehentai_db.dump config.yaml resync_stats.txt
           echo "Cleanup completed"

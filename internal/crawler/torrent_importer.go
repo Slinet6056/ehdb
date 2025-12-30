@@ -192,7 +192,7 @@ func (ti *TorrentImporter) processGallery(ctx context.Context, gid int, token st
 				return 0, fmt.Errorf("save torrents: %w", err)
 			}
 			newCount = len(newTorrents)
-			ti.logger.Info("saved new torrents", zap.Int("gid", gid), zap.Int("root_gid", rootGid), zap.Int("count", newCount))
+			ti.logger.Debug("saved new torrents", zap.Int("gid", gid), zap.Int("root_gid", rootGid), zap.Int("count", newCount))
 		}
 	}
 

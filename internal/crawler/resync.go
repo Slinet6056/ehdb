@@ -106,7 +106,7 @@ func (r *Resyncer) Resync(ctx context.Context, hours int) error {
 		allMetadata = append(allMetadata, metadata...)
 
 		// Rate limiting
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 
 	r.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))
