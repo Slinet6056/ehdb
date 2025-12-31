@@ -12,7 +12,7 @@ This project is inspired by [ccloli/e-hentai-db](https://github.com/ccloli/e-hen
 ### Prerequisites
 
 - Go 1.24 or higher
-- PostgreSQL (16+ required for pre-built database import)
+- PostgreSQL (17+ required for pre-built database import)
 - Docker & Docker Compose (optional)
 
 ### Installation
@@ -69,7 +69,7 @@ wget https://github.com/Slinet6056/ehdb/releases/download/live/ehentai_db.dump
 # Create database
 createdb -U postgres ehentai_db
 
-# Import (requires PostgreSQL 16+ for zstd compression support)
+# Import (requires PostgreSQL 17+)
 pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
 ```
 
@@ -86,7 +86,7 @@ wget https://github.com/Slinet6056/ehdb/releases/download/nightly/ehentai_db.dum
 # Create database
 createdb -U postgres ehentai_db
 
-# Import (requires PostgreSQL 16+ for zstd compression support)
+# Import (requires PostgreSQL 17+)
 pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
 ```
 
