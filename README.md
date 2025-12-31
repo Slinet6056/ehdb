@@ -86,7 +86,7 @@ wget https://github.com/Slinet6056/ehdb/releases/download/nightly/ehentai_db.dum
 # Create database
 createdb -U postgres ehentai_db
 
-# Import (requires PostgreSQL 17+)
+# Import (requires PostgreSQL 16+)
 pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
 ```
 

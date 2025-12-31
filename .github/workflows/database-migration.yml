@@ -31,7 +31,7 @@ jobs:
           - 3306:3306
 
       postgres:
-        image: postgres:17
+        image: postgres:16
         env:
           POSTGRES_USER: ${{ env.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
@@ -51,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget zstd postgresql-client-17 mysql-client pgloader
+          sudo apt-get install -y wget zstd postgresql-client mysql-client pgloader
 
       - name: Download latest database dump
         run: |
