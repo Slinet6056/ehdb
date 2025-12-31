@@ -84,8 +84,8 @@ func (f *Fetcher) Fetch(ctx context.Context, gidTokens []string) error {
 
 		allMetadata = append(allMetadata, metadata...)
 
-		// Rate limiting
-		time.Sleep(2 * time.Second)
+		// Rate limiting for API calls
+		time.Sleep(time.Duration(f.crawler.cfg.APIDelaySeconds) * time.Second)
 	}
 
 	f.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))

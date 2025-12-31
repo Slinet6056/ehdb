@@ -3,7 +3,7 @@ name: Monthly Deep Resync
 on:
   workflow_dispatch:
   schedule:
-    - cron: "5 14 */30 * *"
+    - cron: "0 16 1 * *"
 
 concurrency:
   group: database-sync
@@ -39,6 +39,8 @@ jobs:
             proxy: ""
             retry_times: 3
             wait_for_ip_unban: true
+            page_delay_seconds: 1
+            api_delay_seconds: 3
 
           log_level: info
           EOF

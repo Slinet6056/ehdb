@@ -140,8 +140,8 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 			break
 		}
 
-		// Rate limiting
-		time.Sleep(1 * time.Second)
+		// Rate limiting for page fetches
+		time.Sleep(time.Duration(c.cfg.PageDelaySeconds) * time.Second)
 	}
 
 	if len(items) == 0 {
@@ -229,8 +229,8 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 			)
 		}
 
-		// Rate limiting
-		time.Sleep(1 * time.Second)
+		// Rate limiting for page fetches
+		time.Sleep(time.Duration(c.cfg.PageDelaySeconds) * time.Second)
 	}
 
 	c.logger.Info("torrent sync completed",
@@ -445,8 +445,8 @@ func (c *TorrentCrawler) importMissingGalleries(ctx context.Context, items []Tor
 
 		allMetadata = append(allMetadata, metadata...)
 
-		// Rate limiting
-		time.Sleep(1 * time.Second)
+		// Rate limiting for API calls
+		time.Sleep(time.Duration(c.cfg.APIDelaySeconds) * time.Second)
 	}
 
 	// Import galleries

@@ -3,7 +3,7 @@ name: Sync Database
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 */6 * * *"
+    - cron: "0 1,7,13,19 * * *"
 
 concurrency:
   group: database-sync
@@ -39,6 +39,8 @@ jobs:
             proxy: ""
             retry_times: 3
             wait_for_ip_unban: true
+            page_delay_seconds: 1
+            api_delay_seconds: 1
 
           log_level: info
           EOF

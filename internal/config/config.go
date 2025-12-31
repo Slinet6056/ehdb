@@ -45,12 +45,14 @@ type APILimitsConfig struct {
 
 // CrawlerConfig holds crawler settings
 type CrawlerConfig struct {
-	Host           string `mapstructure:"host"`
-	Cookies        string `mapstructure:"cookies"`
-	Proxy          string `mapstructure:"proxy"`
-	RetryTimes     int    `mapstructure:"retry_times"`
-	WaitForIPUnban bool   `mapstructure:"wait_for_ip_unban"`
-	Offset         int    // Temporary parameter, not from config file
+	Host             string `mapstructure:"host"`
+	Cookies          string `mapstructure:"cookies"`
+	Proxy            string `mapstructure:"proxy"`
+	RetryTimes       int    `mapstructure:"retry_times"`
+	WaitForIPUnban   bool   `mapstructure:"wait_for_ip_unban"`
+	PageDelaySeconds int    `mapstructure:"page_delay_seconds"` // Delay between page fetches
+	APIDelaySeconds  int    `mapstructure:"api_delay_seconds"`  // Delay between API calls
+	Offset           int    // Temporary parameter, not from config file
 }
 
 // SchedulerConfig holds scheduler settings
@@ -87,6 +89,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("crawler.host", "e-hentai.org")
 	v.SetDefault("crawler.retry_times", 3)
 	v.SetDefault("crawler.wait_for_ip_unban", false)
+	v.SetDefault("crawler.page_delay_seconds", 1)
+	v.SetDefault("crawler.api_delay_seconds", 1)
 	v.SetDefault("scheduler.gallery_sync_cron", "0 * * * *")
 	v.SetDefault("scheduler.gallery_sync_enabled", true)
 	v.SetDefault("scheduler.gallery_sync_offset", 0)

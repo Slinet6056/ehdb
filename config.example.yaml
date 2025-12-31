@@ -33,6 +33,11 @@ crawler:
   retry_times: 3
   # Whether to wait when IP is temporarily banned (will parse ban duration and wait)
   wait_for_ip_unban: false
+  # Delay between page fetches (in seconds)
+  page_delay_seconds: 1
+  # Delay between API calls (in seconds)
+  # Based on practice: 1s interval triggers rate limit after ~30 minutes, 2s interval after ~70 minutes
+  api_delay_seconds: 1
 
 scheduler:
   # Gallery sync

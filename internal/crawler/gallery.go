@@ -217,8 +217,8 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 
 		allMetadata = append(allMetadata, metadata...)
 
-		// Rate limiting
-		time.Sleep(2 * time.Second)
+		// Rate limiting for API calls
+		time.Sleep(time.Duration(c.cfg.APIDelaySeconds) * time.Second)
 	}
 
 	c.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))
@@ -286,8 +286,8 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 		next = items[len(items)-1].Gid
 		page++
 
-		// Rate limiting
-		time.Sleep(1 * time.Second)
+		// Rate limiting for page fetches
+		time.Sleep(time.Duration(c.cfg.PageDelaySeconds) * time.Second)
 	}
 
 	return allItems, nil

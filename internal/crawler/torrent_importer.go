@@ -112,8 +112,8 @@ func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 			)
 		}
 
-		// Rate limiting
-		time.Sleep(2 * time.Second)
+		// Rate limiting for page fetches
+		time.Sleep(time.Duration(ti.cfg.PageDelaySeconds) * time.Second)
 	}
 
 	ti.logger.Info("torrent import completed",
