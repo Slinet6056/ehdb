@@ -190,4 +190,5 @@ jobs:
         if: always()
         run: |
           rm -f ehentai_db.dump config.yaml sync_stats.txt
+          docker volume prune -f
           echo "Cleanup completed"
