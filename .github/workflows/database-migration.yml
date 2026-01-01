@@ -195,7 +195,7 @@ jobs:
           body_path: migration_stats.txt
           draft: false
           prerelease: false
-          make_latest: true
+          make_latest: false
           files: |
             ehentai_db.dump
           token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
