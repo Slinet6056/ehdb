@@ -12,6 +12,7 @@ concurrency:
 jobs:
   resync:
     runs-on: self-hosted
+    timeout-minutes: 7200
 
     steps:
       - name: Checkout code
