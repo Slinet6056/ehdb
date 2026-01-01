@@ -151,7 +151,7 @@ jobs:
           pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
           \`\`\`
 
-          **Note: PostgreSQL 16 or later is required (for zstd compression support).**
+          **Note: PostgreSQL 16 or later is required.**
 
           ---
 
