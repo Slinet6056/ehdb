@@ -18,12 +18,12 @@ jobs:
 
     services:
       mysql:
-        image: mariadb:11
+        image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
           MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
         options: >-
-          --health-cmd="mariadb-admin ping -h localhost"
+          --health-cmd="mysqladmin ping -h localhost"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -66,12 +66,12 @@ jobs:
       - name: Import data to MySQL
         run: |
           echo "Importing data to MySQL..."
-          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} < nightly.sql
+          MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} < nightly.sql
 
       - name: Run pre-migration script
         run: |
           echo "Running pre-migration cleanup script..."
-          mysql -h 127.0.0.1 -u root -p${{ env.MYSQL_ROOT_PASSWORD }} ${{ env.MYSQL_DATABASE }} \
+          MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} \
             < migration/pre_migration.sql
 
       - name: Configure and run pgloader

@@ -94,7 +94,7 @@ pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.du
 
 #### Migrate from MySQL
 
-If you have an existing MySQL/MariaDB database, see the [Migration Guide](migration/README.md) for detailed migration instructions using pgloader.
+If you have an existing MySQL database, see the [Migration Guide](migration/README.md) for detailed migration instructions using pgloader.
 
 ## Usage
 

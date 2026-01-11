@@ -1,10 +1,10 @@
 # E-Hentai Database Migration Guide
 
-This guide describes how to migrate E-Hentai database from MySQL/MariaDB to PostgreSQL.
+This guide describes how to migrate E-Hentai database from MySQL to PostgreSQL.
 
 ## Prerequisites
 
-- MySQL/MariaDB
+- MySQL
 - PostgreSQL
 - [pgloader](https://github.com/dimitri/pgloader)
 - Database dump file from [URenko/e-hentai-db releases](https://github.com/URenko/e-hentai-db/releases)
@@ -24,7 +24,7 @@ zstd -d nightly.sql.zstd
 Create databases in both MySQL and PostgreSQL:
 
 ```bash
-# MySQL/MariaDB
+# MySQL
 mysql -u user -p -e "CREATE DATABASE e_hentai_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # PostgreSQL
