@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "45 11 * * *"
 
+permissions:
+  contents: read
+
 env:
   MYSQL_DATABASE: e_hentai_db
   MYSQL_ROOT_PASSWORD: kUbjba7gm247RvBb7TzG
