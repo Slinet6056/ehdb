@@ -58,6 +58,7 @@ jobs:
 
       - name: Download latest database dump
         run: |
+          set -euo pipefail
           # Download latest nightly.sql.zstd from URenko/e-hentai-db
           echo "Downloading nightly database dump..."
           wget -O nightly.sql.zstd "https://github.com/URenko/e-hentai-db/releases/download/nightly/nightly.sql.zstd"
@@ -66,19 +67,44 @@ jobs:
           echo "Extracting database file..."
           zstd -d nightly.sql.zstd -o nightly.sql
 
+          # Verify extracted file exists and is not empty
+          if [ ! -s nightly.sql ]; then
+            echo "Error: Extracted SQL file is empty or does not exist"
+            exit 1
+          fi
+          echo "Database dump downloaded and extracted successfully"
+
       - name: Import data to MySQL
         run: |
+          set -euo pipefail
           echo "Importing data to MySQL..."
           MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} < nightly.sql
 
+          # Verify import succeeded by checking table count
+          TABLE_COUNT=$(MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root \
+            -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${{ env.MYSQL_DATABASE }}'")
+
+          if [ "$TABLE_COUNT" -eq 0 ]; then
+            echo "Error: MySQL import failed - no tables found in database"
+            exit 1
+          fi
+          echo "MySQL import successful - $TABLE_COUNT tables imported"
+
+          # Free disk space early once import is done
+          rm -f nightly.sql nightly.sql.zstd
+          df -h
+
       - name: Run pre-migration script
         run: |
+          set -euo pipefail
           echo "Running pre-migration cleanup script..."
           MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} \
             < migration/pre_migration.sql
+          echo "Pre-migration script completed successfully"
 
       - name: Configure and run pgloader
         run: |
+          set -euo pipefail
           # Create configuration file
           cat > pgloader.conf << EOF
           LOAD DATABASE
@@ -105,36 +131,100 @@ jobs:
           EOF
 
           echo "Starting pgloader migration..."
-          pgloader --dynamic-space-size 4096 pgloader.conf
+          if ! pgloader --dynamic-space-size 4096 pgloader.conf; then
+            echo "Error: pgloader migration failed"
+            exit 1
+          fi
+
+          # Verify migration succeeded by checking for key tables
+          # Check if main tables exist (gallery, tag, etc.)
+          GALLERY_EXISTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'gallery';" | xargs)
+
+          if [ "$GALLERY_EXISTS" -eq 0 ]; then
+            echo "Error: PostgreSQL migration failed - gallery table not found"
+            echo "Checking all tables in database:"
+            PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+              -d ${{ env.POSTGRES_DATABASE }} -c "\dt"
+            exit 1
+          fi
+
+          # Count total tables for reporting
+          PG_TABLE_COUNT=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema');" | xargs)
+
+          echo "pgloader migration successful - $PG_TABLE_COUNT tables migrated"
 
       - name: Run post-migration script
         run: |
+          set -euo pipefail
           echo "Running post-migration script..."
           PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -f migration/post_migration.sql
+            -d ${{ env.POSTGRES_DATABASE }} -v ON_ERROR_STOP=1 -f migration/post_migration.sql
+
+          # Verify optimized tables were created in public schema
+          PUBLIC_GALLERY_EXISTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'gallery';" | xargs)
+
+          if [ "$PUBLIC_GALLERY_EXISTS" -eq 0 ]; then
+            echo "Error: post-migration failed - public.gallery was not created"
+            echo "Listing gallery tables by schema for debugging:"
+            PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+              -d ${{ env.POSTGRES_DATABASE }} -c \
+              "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name = 'gallery' ORDER BY table_schema;"
+            exit 1
+          fi
+          echo "Post-migration script completed successfully"
 
       - name: Export PostgreSQL database
         run: |
+          set -euo pipefail
           echo "Exporting PostgreSQL database..."
           PGPASSWORD=${{ env.POSTGRES_PASSWORD }} pg_dump -h 127.0.0.1 -Fc -Z "zstd" \
             -U ${{ env.POSTGRES_USER }} -f ehentai_db.dump ${{ env.POSTGRES_DATABASE }}
 
+          # Verify dump file was created and is not empty
+          if [ ! -s ehentai_db.dump ]; then
+            echo "Error: Database dump file is empty or does not exist"
+            exit 1
+          fi
+          echo "Database export successful - $(du -h ehentai_db.dump | cut -f1)"
+
       - name: Generate statistics
         run: |
+          set -euo pipefail
           echo "Generating database statistics..."
+
+          # Ensure we query the optimized public schema tables
+          EXPUNGED_TYPE=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+            -d ${{ env.POSTGRES_DATABASE }} -t -c \
+            "SELECT data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'gallery' AND column_name = 'expunged';" \
+            | xargs)
+
+          if [ "$EXPUNGED_TYPE" != "boolean" ]; then
+            echo "Error: public.gallery expunged column type is '$EXPUNGED_TYPE' (expected boolean)"
+            echo "Listing gallery tables by schema for debugging:"
+            PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+              -d ${{ env.POSTGRES_DATABASE }} -c \
+              "SELECT table_schema, table_name FROM information_schema.tables WHERE table_name = 'gallery' ORDER BY table_schema;"
+            exit 1
+          fi
 
           # Collect statistics data
           TOTAL_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery;" | xargs)
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM public.gallery;" | xargs)
 
           ACTIVE_GALLERIES=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery WHERE expunged = FALSE;" | xargs)
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM public.gallery WHERE expunged = FALSE;" | xargs)
 
           TOTAL_TAGS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM tag;" | xargs)
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM public.tag;" | xargs)
 
           TOTAL_TORRENTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
-            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM torrent;" | xargs)
+            -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM public.torrent;" | xargs)
 
           DB_SIZE=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
             -d ${{ env.POSTGRES_DATABASE }} -t -c "SELECT pg_size_pretty(pg_database_size('${{ env.POSTGRES_DATABASE }}'));" | xargs)
@@ -179,7 +269,7 @@ jobs:
           # Add category statistics
           PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
             -d ${{ env.POSTGRES_DATABASE }} -t -A -F'|' \
-            -c "SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
+            -c "SELECT category, COUNT(*) as count FROM public.gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
             | while IFS='|' read -r category count; do
               echo "| ${category} | ${count} |" >> migration_stats.txt
             done
