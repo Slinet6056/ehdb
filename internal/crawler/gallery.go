@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -211,6 +212,9 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 		})
 
 		if err != nil {
+			if errors.Is(err, ErrAuthRequired) {
+				return fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
+			}
 			c.logger.Error("failed to fetch metadata batch", zap.Error(err))
 			continue
 		}

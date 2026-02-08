@@ -93,13 +93,21 @@ func (c *Client) Get(url string) ([]byte, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
+	}
+
+	if marker, ok := isAuthFailureBody(body); ok {
+		return nil, fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	return body, nil
@@ -120,19 +128,31 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 	req.Header.Set("DNT", "1")
 	req.ContentLength = int64(len(jsonData))
 
+	if c.cookies != "" {
+		req.Header.Set("Cookie", c.cookies)
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
+	}
+
+	if marker, ok := isAuthFailureBody(body); ok {
+		return nil, fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	return body, nil

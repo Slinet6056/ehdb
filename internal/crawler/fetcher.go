@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -78,6 +79,9 @@ func (f *Fetcher) Fetch(ctx context.Context, gidTokens []string) error {
 		})
 
 		if err != nil {
+			if errors.Is(err, ErrAuthRequired) {
+				return fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
+			}
 			f.logger.Error("failed to fetch metadata batch", zap.Error(err))
 			continue
 		}

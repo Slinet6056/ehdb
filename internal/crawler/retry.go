@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -84,6 +85,14 @@ func Retry[T any](cfg RetryConfig, fn func() (T, error)) (T, error) {
 
 		lastErr = err
 
+		if errors.Is(err, ErrAuthRequired) {
+			if cfg.Logger != nil {
+				cfg.Logger.Error("auth failure detected, aborting retries", zap.Error(err))
+			}
+			var zero T
+			return zero, fmt.Errorf("authentication failure: %w", err)
+		}
+
 		// Check if this is an IP ban error
 		if cfg.WaitForIPUnban {
 			if duration, isIPBan := parseIPBanDuration(err.Error()); isIPBan {
@@ -143,6 +152,13 @@ func RetryVoid(cfg RetryConfig, fn func() error) error {
 		}
 
 		lastErr = err
+
+		if errors.Is(err, ErrAuthRequired) {
+			if cfg.Logger != nil {
+				cfg.Logger.Error("auth failure detected, aborting retries", zap.Error(err))
+			}
+			return fmt.Errorf("authentication failure: %w", err)
+		}
 
 		// Check if this is an IP ban error
 		if cfg.WaitForIPUnban {

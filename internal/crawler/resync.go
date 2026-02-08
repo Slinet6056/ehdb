@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -100,6 +101,9 @@ func (r *Resyncer) Resync(ctx context.Context, hours int) error {
 		})
 
 		if err != nil {
+			if errors.Is(err, ErrAuthRequired) {
+				return fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
+			}
 			r.logger.Error("failed to fetch metadata batch", zap.Error(err))
 			continue
 		}

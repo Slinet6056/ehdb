@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -96,6 +97,9 @@ func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 			return ti.processGallery(ctx, g.Gid, g.Token, g.Posted)
 		})
 		if err != nil {
+			if errors.Is(err, ErrAuthRequired) {
+				return fmt.Errorf("auth failed while processing gallery %d: %w", g.Gid, err)
+			}
 			ti.logger.Error("failed to process gallery", zap.Int("gid", g.Gid), zap.Error(err))
 		} else {
 			succeeded++
