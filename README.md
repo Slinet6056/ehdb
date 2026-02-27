@@ -11,7 +11,7 @@ This project is inspired by [ccloli/e-hentai-db](https://github.com/ccloli/e-hen
 
 ### Prerequisites
 
-- Go 1.24 or higher
+- Go 1.25 or higher
 - PostgreSQL (17+ required for pre-built database import)
 - Docker & Docker Compose (optional)
 
