@@ -9,6 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/slinet/ehdb/internal/config"
@@ -18,15 +21,17 @@ import (
 // Client is an HTTP client with proxy and cookie support
 type Client struct {
 	httpClient *http.Client
-	cookies    string
 	host       string
+
+	mu      sync.RWMutex
+	cookies map[string]string
 }
 
 // NewClient creates a new crawler client
 func NewClient(cfg *config.CrawlerConfig) (*Client, error) {
 	client := &Client{
-		cookies: cfg.Cookies,
 		host:    cfg.Host,
+		cookies: parseCookieHeader(cfg.Cookies),
 	}
 
 	transport := &http.Transport{
@@ -68,6 +73,143 @@ func NewClient(cfg *config.CrawlerConfig) (*Client, error) {
 	return client, nil
 }
 
+func parseCookieHeader(raw string) map[string]string {
+	cookies := make(map[string]string)
+
+	for _, part := range strings.Split(raw, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		name, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+
+		name = strings.TrimSpace(name)
+		value = strings.TrimSpace(value)
+		if name == "" || value == "" {
+			continue
+		}
+
+		cookies[name] = value
+	}
+
+	return cookies
+}
+
+func buildCookieHeader(cookies map[string]string) string {
+	if len(cookies) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(cookies))
+	for name, value := range cookies {
+		if name == "" || value == "" {
+			continue
+		}
+		keys = append(keys, name)
+	}
+
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+cookies[key])
+	}
+
+	return strings.Join(parts, "; ")
+}
+
+func (c *Client) cookieHeader() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return buildCookieHeader(c.cookies)
+}
+
+func (c *Client) cookieValue(name string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	value, ok := c.cookies[name]
+	return value, ok
+}
+
+func (c *Client) updateCookies(resp *http.Response) {
+	if resp == nil {
+		return
+	}
+
+	responseCookies := resp.Cookies()
+	if len(responseCookies) == 0 {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cookies == nil {
+		c.cookies = make(map[string]string)
+	}
+
+	for _, cookie := range responseCookies {
+		if cookie.Name == "" {
+			continue
+		}
+
+		if cookie.Value == "" || cookie.MaxAge < 0 {
+			delete(c.cookies, cookie.Name)
+			continue
+		}
+
+		c.cookies[cookie.Name] = cookie.Value
+	}
+}
+
+func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte) (string, bool) {
+	if !strings.EqualFold(c.host, "exhentai.org") || resp == nil {
+		return "", false
+	}
+
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	if !strings.Contains(contentType, "text/html") {
+		return "", false
+	}
+
+	igneous, ok := c.cookieValue("igneous")
+	if !ok || !strings.EqualFold(igneous, "mystery") {
+		return "", false
+	}
+
+	if strings.Contains(contentType, "text/html") && len(bytes.TrimSpace(body)) == 0 {
+		return "received blank HTML with igneous=mystery", true
+	}
+
+	return "", false
+}
+
+func (c *Client) validateResponse(resp *http.Response, body []byte) error {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
+	}
+
+	if marker, ok := isAuthFailureBody(body); ok {
+		return fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
+	}
+
+	if reason, ok := c.detectExHentaiAuthFailure(resp, body); ok {
+		return fmt.Errorf("auth failed, detected ExHentai session issue (%s): %w", reason, ErrAuthRequired)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 // Get performs a GET request
 func (c *Client) Get(url string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)
@@ -83,8 +225,8 @@ func (c *Client) Get(url string) ([]byte, error) {
 	req.Header.Set("DNT", "1")
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
 
-	if c.cookies != "" {
-		req.Header.Set("Cookie", c.cookies)
+	if cookieHeader := c.cookieHeader(); cookieHeader != "" {
+		req.Header.Set("Cookie", cookieHeader)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -98,16 +240,10 @@ func (c *Client) Get(url string) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
-	}
+	c.updateCookies(resp)
 
-	if marker, ok := isAuthFailureBody(body); ok {
-		return nil, fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	if err := c.validateResponse(resp, body); err != nil {
+		return nil, err
 	}
 
 	return body, nil
@@ -128,8 +264,8 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 	req.Header.Set("DNT", "1")
 	req.ContentLength = int64(len(jsonData))
 
-	if c.cookies != "" {
-		req.Header.Set("Cookie", c.cookies)
+	if cookieHeader := c.cookieHeader(); cookieHeader != "" {
+		req.Header.Set("Cookie", cookieHeader)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -143,16 +279,10 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
-	}
+	c.updateCookies(resp)
 
-	if marker, ok := isAuthFailureBody(body); ok {
-		return nil, fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	if err := c.validateResponse(resp, body); err != nil {
+		return nil, err
 	}
 
 	return body, nil
