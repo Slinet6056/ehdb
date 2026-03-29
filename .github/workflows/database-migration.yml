@@ -98,14 +98,14 @@ jobs:
                type char to text drop typemod
 
           BEFORE LOAD DO
-              $$ DROP SCHEMA IF EXISTS e_hentai_db CASCADE; $$,
-              $$ CREATE SCHEMA e_hentai_db; $$
+              \$\$ DROP SCHEMA IF EXISTS e_hentai_db CASCADE; \$\$,
+              \$\$ CREATE SCHEMA e_hentai_db; \$\$
 
           AFTER LOAD DO
-              $$ ALTER TABLE public.gallery SET SCHEMA e_hentai_db; $$,
-              $$ ALTER TABLE public.tag SET SCHEMA e_hentai_db; $$,
-              $$ ALTER TABLE public.torrent SET SCHEMA e_hentai_db; $$,
-              $$ ALTER TABLE public.gid_tid SET SCHEMA e_hentai_db; $$;
+              \$\$ ALTER TABLE public.gallery SET SCHEMA e_hentai_db; \$\$,
+              \$\$ ALTER TABLE public.tag SET SCHEMA e_hentai_db; \$\$,
+              \$\$ ALTER TABLE public.torrent SET SCHEMA e_hentai_db; \$\$,
+              \$\$ ALTER TABLE public.gid_tid SET SCHEMA e_hentai_db; \$\$;
           EOF
 
           echo "Starting pgloader migration..."
