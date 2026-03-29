@@ -77,7 +77,7 @@ pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.du
 
 **2. Nightly Migration Database (Alternative)**
 
-Full database migrated from upstream MySQL source, updated daily:
+Full database migrated from the upstream SQLite source dump, updated daily:
 
 ```bash
 # Download the dump file
@@ -92,9 +92,9 @@ pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.du
 
 > **Note**: The nightly database dump is automatically updated daily via [migration workflow](.github/workflows/database-migration.yml).
 
-#### Migrate from MySQL
+#### Migrate from SQLite
 
-If you have an existing MySQL database, see the [Migration Guide](migration/README.md) for detailed migration instructions using pgloader.
+If you have an existing SQLite database, see the [Migration Guide](migration/README.md) for detailed migration instructions using pgloader.
 
 ## Usage
 

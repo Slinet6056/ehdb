@@ -9,8 +9,6 @@ permissions:
   contents: read
 
 env:
-  MYSQL_DATABASE: e_hentai_db
-  MYSQL_ROOT_PASSWORD: kUbjba7gm247RvBb7TzG
   POSTGRES_DATABASE: ehentai_db
   POSTGRES_PASSWORD: LNbzXrnuo2xx9d4PNRgj
   POSTGRES_USER: root
@@ -20,19 +18,6 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      mysql:
-        image: mysql:5.7
-        env:
-          MYSQL_ROOT_PASSWORD: ${{ env.MYSQL_ROOT_PASSWORD }}
-          MYSQL_DATABASE: ${{ env.MYSQL_DATABASE }}
-        options: >-
-          --health-cmd="mysqladmin ping -h localhost"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-        ports:
-          - 3306:3306
-
       postgres:
         image: postgres:16
         env:
@@ -54,53 +39,42 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget zstd postgresql-client mysql-client pgloader
+          sudo apt-get install -y wget zstd sqlite3 postgresql-client pgloader
 
-      - name: Download latest database dump
+      - name: Download upstream SQLite database dump
         run: |
           set -euo pipefail
-          # Download latest nightly.sql.zstd from URenko/e-hentai-db
-          echo "Downloading nightly database dump..."
-          wget -O nightly.sql.zstd "https://github.com/URenko/e-hentai-db/releases/download/nightly/nightly.sql.zstd"
+          # Download upstream SQLite database dump from URenko/e-hentai-db
+          echo "Downloading upstream SQLite database dump..."
+          wget -O e-hentai.db.zst "https://github.com/URenko/e-hentai-db/releases/download/v0.4.0/e-hentai.db.zst"
 
           # Extract
           echo "Extracting database file..."
-          zstd -d nightly.sql.zstd -o nightly.sql
+          zstd -d e-hentai.db.zst -o e-hentai.db
 
           # Verify extracted file exists and is not empty
-          if [ ! -s nightly.sql ]; then
-            echo "Error: Extracted SQL file is empty or does not exist"
+          if [ ! -s e-hentai.db ]; then
+            echo "Error: Extracted SQLite database file is empty or does not exist"
             exit 1
           fi
           echo "Database dump downloaded and extracted successfully"
 
-      - name: Import data to MySQL
+      - name: Run pre-migration script on SQLite
         run: |
           set -euo pipefail
-          echo "Importing data to MySQL..."
-          MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} < nightly.sql
+          echo "Running pre-migration cleanup script on SQLite..."
+          sqlite3 e-hentai.db < migration/pre_migration.sql
 
-          # Verify import succeeded by checking table count
-          TABLE_COUNT=$(MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root \
-            -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '${{ env.MYSQL_DATABASE }}'")
+          # Verify SQLite database contains expected tables after cleanup
+          TABLE_COUNT=$(sqlite3 e-hentai.db "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('gallery', 'tag', 'torrent', 'gid_tid');")
 
-          if [ "$TABLE_COUNT" -eq 0 ]; then
-            echo "Error: MySQL import failed - no tables found in database"
+          if [ "$TABLE_COUNT" -lt 4 ]; then
+            echo "Error: SQLite pre-migration check failed - expected tables are missing"
             exit 1
           fi
-          echo "MySQL import successful - $TABLE_COUNT tables imported"
+          echo "SQLite pre-migration successful - $TABLE_COUNT key tables verified"
 
-          # Free disk space early once import is done
-          rm -f nightly.sql nightly.sql.zstd
           df -h
-
-      - name: Run pre-migration script
-        run: |
-          set -euo pipefail
-          echo "Running pre-migration cleanup script..."
-          MYSQL_PWD=${{ env.MYSQL_ROOT_PASSWORD }} mysql -h 127.0.0.1 -u root ${{ env.MYSQL_DATABASE }} \
-            < migration/pre_migration.sql
-          echo "Pre-migration script completed successfully"
 
       - name: Configure and run pgloader
         run: |
@@ -108,26 +82,30 @@ jobs:
           # Create configuration file
           cat > pgloader.conf << EOF
           LOAD DATABASE
-              FROM mysql://root:${{ env.MYSQL_ROOT_PASSWORD }}@127.0.0.1:3306/${{ env.MYSQL_DATABASE }}
+              FROM sqlite://$(pwd)/e-hentai.db
               INTO postgresql://${{ env.POSTGRES_USER }}:${{ env.POSTGRES_PASSWORD }}@127.0.0.1:5432/${{ env.POSTGRES_DATABASE }}
 
           WITH include drop, create tables, create indexes, reset sequences,
-               workers = 4, concurrency = 2,
-               multiple readers per thread, rows per range = 50000
-
-          SET MySQL PARAMETERS
-              net_read_timeout  = '120',
-              net_write_timeout = '120'
+               workers = 4, concurrency = 2
 
           SET PostgreSQL PARAMETERS
               maintenance_work_mem to '512MB',
               work_mem to '128MB'
 
-          CAST type int when (= precision 11) to integer drop typemod,
-               type bigint when (= precision 20) to bigint drop typemod,
-               type tinyint when (= precision 1) to smallint drop typemod,
-               type char to varchar drop typemod,
-               type varchar to text drop typemod;
+          CAST type integer to bigint using integer-to-string,
+               type tinyint to smallint using integer-to-string,
+               type varchar to text drop typemod,
+               type char to text drop typemod
+
+          BEFORE LOAD DO
+              $$ DROP SCHEMA IF EXISTS e_hentai_db CASCADE; $$,
+              $$ CREATE SCHEMA e_hentai_db; $$
+
+          AFTER LOAD DO
+              $$ ALTER TABLE public.gallery SET SCHEMA e_hentai_db; $$,
+              $$ ALTER TABLE public.tag SET SCHEMA e_hentai_db; $$,
+              $$ ALTER TABLE public.torrent SET SCHEMA e_hentai_db; $$,
+              $$ ALTER TABLE public.gid_tid SET SCHEMA e_hentai_db; $$;
           EOF
 
           echo "Starting pgloader migration..."
@@ -136,14 +114,13 @@ jobs:
             exit 1
           fi
 
-          # Verify migration succeeded by checking for key tables
-          # Check if main tables exist (gallery, tag, etc.)
-          GALLERY_EXISTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
+          # Verify migration succeeded by checking the raw tables were moved into e_hentai_db schema
+          RAW_GALLERY_EXISTS=$(PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
             -d ${{ env.POSTGRES_DATABASE }} -t -c \
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'gallery';" | xargs)
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'e_hentai_db' AND table_name = 'gallery';" | xargs)
 
-          if [ "$GALLERY_EXISTS" -eq 0 ]; then
-            echo "Error: PostgreSQL migration failed - gallery table not found"
+          if [ "$RAW_GALLERY_EXISTS" -eq 0 ]; then
+            echo "Error: PostgreSQL migration failed - e_hentai_db.gallery table not found"
             echo "Checking all tables in database:"
             PGPASSWORD=${{ env.POSTGRES_PASSWORD }} psql -h 127.0.0.1 -U ${{ env.POSTGRES_USER }} \
               -d ${{ env.POSTGRES_DATABASE }} -c "\dt"
@@ -296,5 +273,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -f nightly.sql nightly.sql.zstd pgloader.conf
+          rm -f e-hentai.db e-hentai.db.zst pgloader.conf
           echo "Cleanup completed"

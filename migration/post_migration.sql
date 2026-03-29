@@ -3,7 +3,8 @@
 -- ============================================================================
 -- Function: Convert raw data migrated by pgloader into an optimized PostgreSQL structure
 --
--- Prerequisite: MySQL data has been imported into PostgreSQL via pgloader
+-- Prerequisite: SQLite data has been imported into PostgreSQL via pgloader
+--               and the raw imported tables have been moved into the e_hentai_db schema
 --
 -- Execution (Local):
 --   psql -U user -d ehentai_db -f post_migration.sql

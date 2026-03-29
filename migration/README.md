@@ -1,10 +1,10 @@
 # E-Hentai Database Migration Guide
 
-This guide describes how to migrate E-Hentai database from MySQL to PostgreSQL.
+This guide describes how to migrate E-Hentai database from SQLite to PostgreSQL.
 
 ## Prerequisites
 
-- MySQL
+- SQLite 3
 - PostgreSQL
 - [pgloader](https://github.com/dimitri/pgloader)
 - Database dump file from [URenko/e-hentai-db releases](https://github.com/URenko/e-hentai-db/releases)
@@ -13,46 +13,35 @@ This guide describes how to migrate E-Hentai database from MySQL to PostgreSQL.
 
 ### 1. Download and Extract Database Dump
 
-Download `nightly.sql.zstd` from the [releases page](https://github.com/URenko/e-hentai-db/releases) and extract it:
+Download `e-hentai.db.zst` from the [releases page](https://github.com/URenko/e-hentai-db/releases) and extract it:
 
 ```bash
-zstd -d nightly.sql.zstd
+zstd -d e-hentai.db.zst -o e-hentai.db
 ```
 
 ### 2. Create Databases
 
-Create databases in both MySQL and PostgreSQL:
+Create the PostgreSQL database:
 
 ```bash
-# MySQL
-mysql -u user -p -e "CREATE DATABASE e_hentai_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
 # PostgreSQL
 psql -U user -c "CREATE DATABASE ehentai_db;"
 ```
 
-### 3. Import Data to MySQL
+### 3. Run Pre-migration Script
 
-Import the extracted SQL file into MySQL:
-
-```bash
-mysql -u user -p e_hentai_db < nightly.sql
-```
-
-### 4. Run Pre-migration Script
-
-Clean up data before migration:
+Clean up the extracted SQLite database before migration:
 
 ```bash
-mysql -u user -p e_hentai_db < pre_migration.sql
+sqlite3 e-hentai.db < pre_migration.sql
 ```
 
-### 5. Configure and Run pgloader
+### 4. Configure and Run pgloader
 
-Edit `pgloader.conf` to update database connection strings:
+Edit `pgloader.conf` to update the SQLite file path and PostgreSQL connection string:
 
 ```
-FROM mysql://user:password@localhost:3306/e_hentai_db
+FROM sqlite:///path/to/e-hentai.db
 INTO postgresql://user:password@localhost:5432/ehentai_db
 ```
 
@@ -62,7 +51,7 @@ Run the migration:
 pgloader pgloader.conf
 ```
 
-### 6. Run Post-migration Script
+### 5. Run Post-migration Script
 
 Complete the migration by running the post-migration script in PostgreSQL:
 
@@ -72,9 +61,8 @@ psql -U user -d ehentai_db -f post_migration.sql
 
 ## Notes
 
-- The default MySQL database name is `e_hentai_db`
 - The default PostgreSQL database name is `ehentai_db`
-- If you use different database names, update them in `pgloader.conf`, `pre_migration.sql`, and `post_migration.sql`
+- If you use different database names or file paths, update them in `pgloader.conf` and the commands above
 
 ## Acknowledgments
 
