@@ -68,10 +68,10 @@ jobs:
           log_level: info
           EOF
 
-      - name: Sync latest galleries
+      - name: Sync latest galleries with replay window
         run: |
-          echo "Syncing latest galleries..."
-          ./bin/ehdb-sync sync -config config.yaml -offset 2
+          echo "Syncing latest galleries with a 12-hour replay window..."
+          ./bin/ehdb-sync sync -config config.yaml -offset 12
 
       - name: Sync torrents
         run: |
@@ -188,7 +188,7 @@ jobs:
           echo "---" >> sync_stats.txt
           echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> sync_stats.txt
           echo "" >> sync_stats.txt
-          echo "**Sync Type:** Regular Sync (every 6 hours)" >> sync_stats.txt
+          echo "**Sync Type:** Regular Sync (every 6 hours, 12-hour replay window)" >> sync_stats.txt
 
           cat sync_stats.txt
 

@@ -69,10 +69,10 @@ jobs:
           log_level: info
           EOF
 
-      - name: Resync galleries from last 3 months
+      - name: Replay galleries from last 3 months
         run: |
-          echo "Resyncing galleries from last 90 days..."
-          ./bin/ehdb-sync resync -config config.yaml -hours 2160
+          echo "Replaying gallery list from last 90 days to refresh and backfill galleries..."
+          ./bin/ehdb-sync sync -config config.yaml -offset 2160
 
       - name: Mark replaced galleries
         run: |
@@ -189,7 +189,7 @@ jobs:
           echo "---" >> resync_stats.txt
           echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> resync_stats.txt
           echo "" >> resync_stats.txt
-          echo "**Sync Type:** Monthly Deep Resync (3 months of data)" >> resync_stats.txt
+          echo "**Sync Type:** Monthly Deep Replay Sync (3 months list replay + refresh)" >> resync_stats.txt
 
           cat resync_stats.txt
 
