@@ -20,19 +20,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Install 1Password CLI
+        if: vars.OP_COOKIES_SECRET_REFERENCE != '' || (vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != '')
+        uses: 1password/install-cli-action@v3
+
       - name: Load crawler cookies from 1Password
-        id: load_crawler_cookies
+        if: vars.OP_COOKIES_SECRET_REFERENCE != ''
         continue-on-error: true
-        uses: 1password/load-secrets-action@v4
         env:
           OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-          EHENTAI_COOKIES_JSON: ${{ vars.OP_COOKIES_SECRET_REFERENCE }}
-
-      - name: Write crawler cookies file
-        if: steps.load_crawler_cookies.outcome == 'success' && steps.load_crawler_cookies.outputs.EHENTAI_COOKIES_JSON != ''
-        env:
-          EHENTAI_COOKIES_JSON: ${{ steps.load_crawler_cookies.outputs.EHENTAI_COOKIES_JSON }}
+          OP_COOKIES_SECRET_REFERENCE: ${{ vars.OP_COOKIES_SECRET_REFERENCE }}
         run: |
+          if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+            echo "OP_SERVICE_ACCOUNT_TOKEN is not configured, skipping 1Password cookie load"
+            exit 0
+          fi
+
+          export EHENTAI_COOKIES_JSON="$(op read "$OP_COOKIES_SECRET_REFERENCE")"
           umask 077
           python .github/scripts/write_cookies_json.py
 
@@ -73,10 +77,6 @@ jobs:
         run: |
           echo "Syncing torrents..."
           ./bin/ehdb-sync torrent-sync -config config.yaml
-
-      - name: Install 1Password CLI
-        if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
-        uses: 1password/install-cli-action@v3
 
       - name: Persist crawler cookies to 1Password
         if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
