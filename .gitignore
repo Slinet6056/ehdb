@@ -24,10 +24,12 @@ go.work
 # Configuration files with sensitive data
 config.yaml
 .cookies
+cookies.json
 
 # Temporary files
 /temp/
 *.log
+__pycache__/
 
 # IDE
 .vscode/

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/viper"
 )
@@ -47,6 +48,7 @@ type APILimitsConfig struct {
 type CrawlerConfig struct {
 	Host             string `mapstructure:"host"`
 	Cookies          string `mapstructure:"cookies"`
+	ConfigDir        string
 	Proxy            string `mapstructure:"proxy"`
 	RetryTimes       int    `mapstructure:"retry_times"`
 	WaitForIPUnban   bool   `mapstructure:"wait_for_ip_unban"`
@@ -124,6 +126,13 @@ func Load(configPath string) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	configFileUsed := v.ConfigFileUsed()
+	if configFileUsed != "" {
+		cfg.Crawler.ConfigDir = filepath.Dir(configFileUsed)
+	} else {
+		cfg.Crawler.ConfigDir = "."
 	}
 
 	globalConfig = &cfg
