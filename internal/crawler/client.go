@@ -20,8 +20,9 @@ import (
 
 // Client is an HTTP client with proxy and cookie support
 type Client struct {
-	httpClient *http.Client
-	host       string
+	httpClient  *http.Client
+	host        string
+	cookiesPath string
 
 	mu      sync.RWMutex
 	cookies map[string]string
@@ -29,9 +30,17 @@ type Client struct {
 
 // NewClient creates a new crawler client
 func NewClient(cfg *config.CrawlerConfig) (*Client, error) {
+	cookiesPath := resolveCookiesFilePath(cfg.ConfigDir)
+
+	fileCookies, err := loadCookiesFromFile(cookiesPath)
+	if err != nil {
+		return nil, fmt.Errorf("load cookies: %w", err)
+	}
+
 	client := &Client{
-		host:    cfg.Host,
-		cookies: parseCookieHeader(cfg.Cookies),
+		host:        cfg.Host,
+		cookiesPath: cookiesPath,
+		cookies:     mergeCookies(parseCookieHeader(cfg.Cookies), fileCookies),
 	}
 
 	transport := &http.Transport{
@@ -137,35 +146,90 @@ func (c *Client) cookieValue(name string) (string, bool) {
 	return value, ok
 }
 
-func (c *Client) updateCookies(resp *http.Response) {
+func (c *Client) updateCookies(resp *http.Response) error {
 	if resp == nil {
-		return
+		return c.persistCookiesSnapshotIfMissing()
 	}
 
 	responseCookies := resp.Cookies()
 	if len(responseCookies) == 0 {
-		return
+		return c.persistCookiesSnapshotIfMissing()
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.cookies == nil {
 		c.cookies = make(map[string]string)
 	}
+
+	changed := false
 
 	for _, cookie := range responseCookies {
 		if cookie.Name == "" {
 			continue
 		}
 
-		if cookie.Value == "" || cookie.MaxAge < 0 {
-			delete(c.cookies, cookie.Name)
+		if cookie.Value == "" || cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
+			if _, exists := c.cookies[cookie.Name]; exists {
+				delete(c.cookies, cookie.Name)
+				changed = true
+			}
+			continue
+		}
+
+		if currentValue, exists := c.cookies[cookie.Name]; exists && currentValue == cookie.Value {
 			continue
 		}
 
 		c.cookies[cookie.Name] = cookie.Value
+		changed = true
 	}
+
+	snapshot := normalizeCookies(c.cookies)
+	cookiesPath := c.cookiesPath
+	c.mu.Unlock()
+
+	if !changed {
+		return c.persistCookiesSnapshotIfMissing()
+	}
+
+	if cookiesPath == "" {
+		cookiesPath = resolveCookiesFilePath("")
+	}
+
+	if err := persistCookiesToFile(cookiesPath, snapshot); err != nil {
+		return fmt.Errorf("persist cookies: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) persistCookiesSnapshotIfMissing() error {
+	c.mu.RLock()
+	snapshot := normalizeCookies(c.cookies)
+	cookiesPath := c.cookiesPath
+	c.mu.RUnlock()
+
+	if len(snapshot) == 0 {
+		return nil
+	}
+
+	if cookiesPath == "" {
+		cookiesPath = resolveCookiesFilePath("")
+	}
+
+	exists, err := cookiesFileExists(cookiesPath)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	if err := persistCookiesToFile(cookiesPath, snapshot); err != nil {
+		return fmt.Errorf("persist cookies: %w", err)
+	}
+
+	return nil
 }
 
 func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte) (string, bool) {
@@ -240,7 +304,9 @@ func (c *Client) Get(url string) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	c.updateCookies(resp)
+	if err := c.updateCookies(resp); err != nil {
+		return nil, err
+	}
 
 	if err := c.validateResponse(resp, body); err != nil {
 		return nil, err
@@ -279,7 +345,9 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	c.updateCookies(resp)
+	if err := c.updateCookies(resp); err != nil {
+		return nil, err
+	}
 
 	if err := c.validateResponse(resp, body); err != nil {
 		return nil, err

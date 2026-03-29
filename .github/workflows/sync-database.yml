@@ -20,6 +20,22 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Load crawler cookies from 1Password
+        id: load_crawler_cookies
+        continue-on-error: true
+        uses: 1password/load-secrets-action@v4
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          EHENTAI_COOKIES_JSON: ${{ vars.OP_COOKIES_SECRET_REFERENCE }}
+
+      - name: Write crawler cookies file
+        if: steps.load_crawler_cookies.outcome == 'success' && steps.load_crawler_cookies.outputs.EHENTAI_COOKIES_JSON != ''
+        env:
+          EHENTAI_COOKIES_JSON: ${{ steps.load_crawler_cookies.outputs.EHENTAI_COOKIES_JSON }}
+        run: |
+          umask 077
+          python .github/scripts/write_cookies_json.py
+
       - name: Build ehdb-sync
         run: |
           echo "Building ehdb-sync..."
@@ -57,6 +73,38 @@ jobs:
         run: |
           echo "Syncing torrents..."
           ./bin/ehdb-sync torrent-sync -config config.yaml
+
+      - name: Install 1Password CLI
+        if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
+        uses: 1password/install-cli-action@v3
+
+      - name: Persist crawler cookies to 1Password
+        if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          OP_COOKIES_VAULT: ${{ vars.OP_COOKIES_VAULT }}
+          OP_COOKIES_ITEM: ${{ vars.OP_COOKIES_ITEM }}
+        run: |
+          if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+            echo "OP_SERVICE_ACCOUNT_TOKEN is not configured, skipping 1Password persistence"
+            exit 0
+          fi
+
+          umask 077
+          if op item get "$OP_COOKIES_ITEM" --vault "$OP_COOKIES_VAULT" --format json > op-item.json 2>/dev/null; then
+            chmod 600 op-item.json
+          else
+            rm -f op-item.json
+          fi
+          if [ -f op-item.json ]; then
+            python .github/scripts/prepare_op_item.py --mode update --item-path op-item.json
+            op item edit "$OP_COOKIES_ITEM" --vault "$OP_COOKIES_VAULT" --template op-item.json </dev/null > /dev/null
+          else
+            op item template get "Secure Note" > op-item-create.json
+            chmod 600 op-item-create.json
+            python .github/scripts/prepare_op_item.py --mode create --item-path op-item-create.json --title "$OP_COOKIES_ITEM"
+            op item create --vault "$OP_COOKIES_VAULT" --template op-item-create.json </dev/null > /dev/null
+          fi
 
       - name: Export PostgreSQL database
         run: |
@@ -160,5 +208,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -f ehentai_db.dump config.yaml sync_stats.txt
+          rm -f cookies.json ehentai_db.dump config.yaml op-item-create.json op-item.json sync_stats.txt
           echo "Cleanup completed"
