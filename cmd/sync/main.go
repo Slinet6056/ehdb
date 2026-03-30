@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/slinet/ehdb/internal/config"
 	"github.com/slinet/ehdb/internal/crawler"
@@ -65,7 +66,7 @@ func printUsage() {
 	fmt.Println("  sync              Sync latest galleries from E-Hentai")
 	fmt.Println("                    Options: -config <path> -host <host> -offset <hours>")
 	fmt.Println("  backfill          Backfill missing galleries from the list replay window")
-	fmt.Println("                    Options: -config <path> -host <host> -offset <hours>")
+	fmt.Println("                    Options: -config <path> -host <host> (-offset <hours> | -start <time> -end <time>)")
 	fmt.Println("  resync            Resync galleries from recent hours")
 	fmt.Println("                    Options: -config <path> -hours <N>")
 	fmt.Println("  fetch             Manually fetch specific galleries")
@@ -82,6 +83,7 @@ func printUsage() {
 	fmt.Println("\nExamples:")
 	fmt.Println("  ehdb-sync sync -host e-hentai.org -offset 2")
 	fmt.Println("  ehdb-sync backfill -host e-hentai.org -offset 2160")
+	fmt.Println("  ehdb-sync backfill -host e-hentai.org -start 2026-01-01T00:00:00Z -end 2026-03-31T00:00:00Z")
 	fmt.Println("  ehdb-sync resync -hours 24")
 	fmt.Println("  ehdb-sync fetch 123456/abcdef0123 234567/bcdef01234")
 	fmt.Println("  ehdb-sync torrent-sync")
@@ -132,7 +134,9 @@ func runBackfill(logger *zap.Logger, args []string) {
 	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "path to config file")
 	host := fs.String("host", "", "e-hentai.org or exhentai.org (overrides config)")
-	offset := fs.Int("offset", 720, "time offset in hours")
+	start := fs.String("start", "", "backfill window start time (RFC3339, 2006-01-02 15:04, or 2006-01-02)")
+	end := fs.String("end", "", "backfill window end time (RFC3339, 2006-01-02 15:04, or 2006-01-02)")
+	offset := fs.Int("offset", 0, "backfill window offset in hours")
 	if err := fs.Parse(args); err != nil {
 		logger.Fatal("failed to parse flags", zap.Error(err))
 	}
@@ -145,9 +149,13 @@ func runBackfill(logger *zap.Logger, args []string) {
 	if *host != "" {
 		cfg.Crawler.Host = *host
 	}
-	if *offset != 0 {
-		cfg.Crawler.Offset = *offset
+
+	startTime, endTime, err := resolveBackfillWindow(*start, *end, *offset)
+	if err != nil {
+		logger.Fatal("failed to resolve backfill window", zap.Error(err))
 	}
+	cfg.Crawler.BackfillStart = startTime.Unix()
+	cfg.Crawler.BackfillEnd = endTime.Unix()
 
 	if err := database.Init(&cfg.Database, logger); err != nil {
 		logger.Fatal("failed to initialize database", zap.Error(err))
@@ -164,6 +172,65 @@ func runBackfill(logger *zap.Logger, args []string) {
 		logger.Fatal("gallery backfill failed", zap.Error(err))
 	}
 	logger.Info("gallery backfill completed successfully")
+}
+
+func resolveBackfillWindow(startRaw, endRaw string, offsetHours int) (time.Time, time.Time, error) {
+	hasStart := startRaw != ""
+	hasEnd := endRaw != ""
+	hasOffset := offsetHours > 0
+
+	if hasOffset && (hasStart || hasEnd) {
+		return time.Time{}, time.Time{}, fmt.Errorf("-offset cannot be used together with -start or -end")
+	}
+
+	if !hasOffset && !hasStart && !hasEnd {
+		return time.Time{}, time.Time{}, fmt.Errorf("either -offset or both -start and -end must be provided")
+	}
+
+	if hasStart != hasEnd {
+		return time.Time{}, time.Time{}, fmt.Errorf("-start and -end must be provided together")
+	}
+
+	if hasOffset {
+		endTime := time.Now().UTC()
+		startTime := endTime.Add(-time.Duration(offsetHours) * time.Hour)
+		return startTime, endTime, nil
+	}
+
+	startTime, err := parseBackfillTime(startRaw, true)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("parse start time: %w", err)
+	}
+
+	endTime, err := parseBackfillTime(endRaw, false)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("parse end time: %w", err)
+	}
+
+	if !startTime.Before(endTime) {
+		return time.Time{}, time.Time{}, fmt.Errorf("start time must be before end time")
+	}
+
+	return startTime.UTC(), endTime.UTC(), nil
+}
+
+func parseBackfillTime(value string, isStart bool) (time.Time, error) {
+	layouts := []string{time.RFC3339, "2006-01-02 15:04", "2006-01-02"}
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err != nil {
+			continue
+		}
+		if layout == "2006-01-02" {
+			if isStart {
+				return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC), nil
+			}
+			return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 23, 59, 59, 0, time.UTC), nil
+		}
+		return parsed.UTC(), nil
+	}
+
+	return time.Time{}, fmt.Errorf("unsupported time format %q", value)
 }
 
 // runResync resyncs galleries from recent hours

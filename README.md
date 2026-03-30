@@ -137,17 +137,21 @@ Synchronize the latest galleries from E-Hentai/ExHentai. When `-offset` is set, 
 
 #### Backfill Missing Galleries
 
-Replay the gallery list within a time window, compare discovered galleries against the database, and import only missing gids:
+Replay the gallery list within a time window, compare discovered galleries against the database, and import only missing gids. The crawler also derives a starting pagination cursor near the end of the requested window from the database when possible:
 
 ```bash
-./bin/ehdb-sync backfill -offset 2160
+./bin/ehdb-sync backfill -start 2026-01-01T00:00:00Z -end 2026-03-31T00:00:00Z
 ```
 
 **Parameters:**
 
 - `-config`: Config file path (optional, default: `config.yaml`)
 - `-host`: Specify the site - `e-hentai.org` or `exhentai.org` (optional, overrides config)
-- `-offset`: Replay window in hours used to discover missing galleries (optional, default: 720)
+- `-offset`: Backfill the most recent N hours (optional, mutually exclusive with `-start`/`-end`)
+- `-start`: Backfill window start time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`)
+- `-end`: Backfill window end time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`)
+- `-offset` and `-start`/`-end` are mutually exclusive
+- You must provide either `-offset`, or both `-start` and `-end`
 
 #### Resync Recent Galleries
 

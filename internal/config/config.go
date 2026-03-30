@@ -55,6 +55,8 @@ type CrawlerConfig struct {
 	PageDelaySeconds int    `mapstructure:"page_delay_seconds"` // Delay between page fetches
 	APIDelaySeconds  int    `mapstructure:"api_delay_seconds"`  // Delay between API calls
 	Offset           int    // Temporary parameter, not from config file
+	BackfillStart    int64  // Temporary parameter, not from config file
+	BackfillEnd      int64  // Temporary parameter, not from config file
 }
 
 // SchedulerConfig holds scheduler settings

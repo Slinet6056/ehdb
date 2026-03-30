@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/slinet/ehdb/internal/config"
 	"github.com/slinet/ehdb/internal/database"
 	"github.com/slinet/ehdb/pkg/utils"
@@ -76,6 +77,14 @@ func (c *GalleryCrawler) GetPages(next string, expunged bool) ([]GalleryListItem
 				Posted: string(match[3]),
 			})
 		}
+	}
+
+	if len(items) == 0 {
+		if reason, ok := abnormalGalleryListPageReason(body); ok {
+			return nil, fmt.Errorf("gallery list page abnormal: %s: %w", reason, ErrAbnormalPage)
+		}
+
+		return nil, fmt.Errorf("gallery list page returned no parseable items: %w", ErrAbnormalPage)
 	}
 
 	return items, nil
@@ -179,12 +188,12 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 func (c *GalleryCrawler) Backfill(ctx context.Context) error {
 	c.logger.Info("starting gallery backfill")
 
-	thresholdPosted, err := c.getSyncThreshold(ctx)
+	window, err := c.getBackfillWindow(ctx)
 	if err != nil {
 		return err
 	}
 
-	allItems, err := c.collectGalleryItems(thresholdPosted)
+	allItems, err := c.collectGalleryItemsInWindow(window)
 	if err != nil {
 		return err
 	}
@@ -227,6 +236,12 @@ func (c *GalleryCrawler) Backfill(ctx context.Context) error {
 	return nil
 }
 
+type backfillWindow struct {
+	startPosted int64
+	endPosted   int64
+	startNext   string
+}
+
 func (c *GalleryCrawler) getSyncThreshold(ctx context.Context) (int64, error) {
 	lastPosted, err := c.GetLastPosted(ctx)
 	if err != nil {
@@ -244,6 +259,61 @@ func (c *GalleryCrawler) getSyncThreshold(ctx context.Context) (int64, error) {
 	return normalizePostedThreshold(lastPosted), nil
 }
 
+func (c *GalleryCrawler) getBackfillWindow(ctx context.Context) (backfillWindow, error) {
+	startPosted := normalizePostedThreshold(c.cfg.BackfillStart)
+	endPosted := normalizePostedThreshold(c.cfg.BackfillEnd)
+
+	if startPosted <= 0 || endPosted <= 0 {
+		return backfillWindow{}, fmt.Errorf("backfill time window is required")
+	}
+
+	if endPosted < startPosted {
+		return backfillWindow{}, fmt.Errorf("invalid backfill window: end before start")
+	}
+
+	startNext, err := c.getBackfillStartCursor(ctx, endPosted)
+	if err != nil {
+		return backfillWindow{}, fmt.Errorf("derive backfill start cursor: %w", err)
+	}
+
+	c.logger.Info("resolved backfill window",
+		zap.Int64("start_posted", startPosted),
+		zap.Int64("end_posted", endPosted),
+		zap.String("start_next", startNext),
+	)
+
+	return backfillWindow{
+		startPosted: startPosted,
+		endPosted:   endPosted,
+		startNext:   startNext,
+	}, nil
+}
+
+func (c *GalleryCrawler) getBackfillStartCursor(ctx context.Context, endPosted int64) (string, error) {
+	pool := database.GetPool()
+
+	query := `
+		SELECT gid
+		FROM gallery
+		WHERE bytorrent = false
+		  AND EXTRACT(EPOCH FROM posted) >= $1
+		ORDER BY posted ASC, gid ASC
+		LIMIT 1
+	`
+
+	var gid int
+	err := pool.QueryRow(ctx, query, endPosted).Scan(&gid)
+	if err == nil {
+		return strconv.Itoa(gid), nil
+	}
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+
+	return "", err
+}
+
 func normalizePostedThreshold(posted int64) int64 {
 	if posted <= 0 {
 		return posted
@@ -256,14 +326,34 @@ func (c *GalleryCrawler) collectGalleryItems(thresholdPosted int64) ([]GalleryLi
 	var allItems []GalleryListItem
 
 	c.logger.Debug("fetching normal pages")
-	items, err := c.fetchPages(false, thresholdPosted)
+	items, err := c.fetchPages(false, thresholdPosted, 0, "")
 	if err != nil {
 		return nil, fmt.Errorf("fetch normal pages: %w", err)
 	}
 	allItems = append(allItems, items...)
 
 	c.logger.Debug("fetching expunged pages")
-	items, err = c.fetchPages(true, thresholdPosted)
+	items, err = c.fetchPages(true, thresholdPosted, 0, "")
+	if err != nil {
+		return nil, fmt.Errorf("fetch expunged pages: %w", err)
+	}
+	allItems = append(allItems, items...)
+
+	return dedupeGalleryItems(allItems), nil
+}
+
+func (c *GalleryCrawler) collectGalleryItemsInWindow(window backfillWindow) ([]GalleryListItem, error) {
+	var allItems []GalleryListItem
+
+	c.logger.Debug("fetching normal pages for backfill window")
+	items, err := c.fetchPages(false, window.startPosted, window.endPosted, window.startNext)
+	if err != nil {
+		return nil, fmt.Errorf("fetch normal pages: %w", err)
+	}
+	allItems = append(allItems, items...)
+
+	c.logger.Debug("fetching expunged pages for backfill window")
+	items, err = c.fetchPages(true, window.startPosted, window.endPosted, window.startNext)
 	if err != nil {
 		return nil, fmt.Errorf("fetch expunged pages: %w", err)
 	}
@@ -401,9 +491,9 @@ func (c *GalleryCrawler) getExistingGalleryIDs(ctx context.Context, items []Gall
 }
 
 // fetchPages fetches all pages until reaching lastPosted
-func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryListItem, error) {
+func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64, endPosted int64, startNext string) ([]GalleryListItem, error) {
 	var allItems []GalleryListItem
-	next := ""
+	next := startNext
 	page := 0
 	consecutiveOldPages := 0
 
@@ -411,6 +501,7 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 		c.logger.Debug("fetching page",
 			zap.Bool("expunged", expunged),
 			zap.Int("page", page),
+			zap.String("next", next),
 		)
 
 		items, err := Retry(RetryConfig{
@@ -425,11 +516,15 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 			return nil, fmt.Errorf("fetch page %d: %w", page, err)
 		}
 
-		if len(items) == 0 {
-			break
-		}
+		c.logger.Debug("parsed gallery page",
+			zap.Bool("expunged", expunged),
+			zap.Int("page", page),
+			zap.String("next", next),
+			zap.Int("items", len(items)),
+		)
 
 		pageHasRecentItems := false
+		pageHasItemsAfterStart := false
 		for _, item := range items {
 			// Parse posted time: "2024-01-01 12:00" -> timestamp
 			posted, err := c.parsePostedTime(item.Posted)
@@ -439,17 +534,31 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 			}
 
 			if posted >= lastPosted {
+				pageHasItemsAfterStart = true
+			}
+
+			if posted >= lastPosted && (endPosted == 0 || posted <= endPosted) {
 				allItems = append(allItems, item)
 				pageHasRecentItems = true
-			} else {
-				continue
 			}
 		}
 
-		if pageHasRecentItems {
+		if pageHasItemsAfterStart {
 			consecutiveOldPages = 0
 		} else {
 			consecutiveOldPages++
+			c.logger.Debug("gallery page contains no items within threshold",
+				zap.Bool("expunged", expunged),
+				zap.Int("page", page),
+				zap.Int("consecutive_old_pages", consecutiveOldPages),
+			)
+		}
+
+		if pageHasRecentItems {
+			c.logger.Debug("gallery page yielded items inside backfill window",
+				zap.Bool("expunged", expunged),
+				zap.Int("page", page),
+			)
 		}
 
 		if consecutiveOldPages >= consecutiveOldPagesLimit {

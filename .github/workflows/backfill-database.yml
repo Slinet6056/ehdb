@@ -2,6 +2,15 @@ name: Backfill Database
 
 on:
   workflow_dispatch:
+    inputs:
+      start_time:
+        description: "Backfill window start time (RFC3339). Defaults to end_time minus 90 days."
+        required: false
+        type: string
+      end_time:
+        description: "Backfill window end time (RFC3339). Defaults to current UTC time."
+        required: false
+        type: string
   schedule:
     - cron: "0 16 * * 0"
 
@@ -63,16 +72,45 @@ jobs:
             proxy: ""
             retry_times: 3
             wait_for_ip_unban: true
-            page_delay_seconds: 1
+            page_delay_seconds: 5
             api_delay_seconds: 3
 
           log_level: info
           EOF
 
       - name: Backfill galleries from last 3 months
+        env:
+          INPUT_START_TIME: ${{ github.event.inputs.start_time }}
+          INPUT_END_TIME: ${{ github.event.inputs.end_time }}
         run: |
-          echo "Backfilling missing galleries from the last 90 days..."
-          ./bin/ehdb-sync backfill -config config.yaml -offset 2160
+          python - <<'PY' >> "$GITHUB_ENV"
+          from datetime import datetime, timezone
+          import os
+
+          end_time = os.getenv("INPUT_END_TIME", "").strip()
+          start_time = os.getenv("INPUT_START_TIME", "").strip()
+
+          if bool(start_time) != bool(end_time):
+              raise SystemExit("start_time and end_time must be provided together for manual backfill")
+
+          if not start_time:
+              print("BACKFILL_MODE=offset")
+              print("BACKFILL_OFFSET=2160")
+          else:
+              print("BACKFILL_MODE=window")
+              end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")).astimezone(timezone.utc)
+              start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")).astimezone(timezone.utc)
+              print(f"BACKFILL_START={start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+              print(f"BACKFILL_END={end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+          PY
+
+          if [ "$BACKFILL_MODE" = "window" ]; then
+            echo "Backfilling missing galleries from ${BACKFILL_START} to ${BACKFILL_END}..."
+            ./bin/ehdb-sync backfill -config config.yaml -start "$BACKFILL_START" -end "$BACKFILL_END"
+          else
+            echo "Backfilling missing galleries with offset ${BACKFILL_OFFSET} hours..."
+            ./bin/ehdb-sync backfill -config config.yaml -offset "$BACKFILL_OFFSET"
+          fi
 
       - name: Persist crawler cookies to 1Password
         if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
@@ -181,7 +219,11 @@ jobs:
           echo "---" >> backfill_stats.txt
           echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> backfill_stats.txt
           echo "" >> backfill_stats.txt
-          echo "**Sync Type:** Weekly Backfill Sync (3 months of missing galleries)" >> backfill_stats.txt
+          if [ "$BACKFILL_MODE" = "window" ]; then
+            echo "**Sync Type:** Weekly Backfill Sync (${BACKFILL_START} to ${BACKFILL_END})" >> backfill_stats.txt
+          else
+            echo "**Sync Type:** Weekly Backfill Sync (offset ${BACKFILL_OFFSET} hours)" >> backfill_stats.txt
+          fi
 
           cat backfill_stats.txt
 
