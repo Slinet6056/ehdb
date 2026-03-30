@@ -2,8 +2,10 @@ package crawler
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var (
@@ -11,6 +13,39 @@ var (
 	ErrAuthRequired = errors.New("authentication required or insufficient permissions")
 	ErrAbnormalPage = errors.New("abnormal page response")
 )
+
+type PartialBackfillError struct {
+	Cause           error
+	ImportedCount   int
+	DiscoveredCount int
+	MissingCount    int
+	ResumeStart     time.Time
+	ResumeEnd       time.Time
+}
+
+func (e *PartialBackfillError) Error() string {
+	if e == nil {
+		return "partial backfill interrupted"
+	}
+
+	return fmt.Sprintf(
+		"partial backfill interrupted after importing %d of %d missing galleries (%d discovered total); rerun overlapping window with -start %s -end %s: %v",
+		e.ImportedCount,
+		e.MissingCount,
+		e.DiscoveredCount,
+		e.ResumeStart.UTC().Format(time.RFC3339),
+		e.ResumeEnd.UTC().Format(time.RFC3339),
+		e.Cause,
+	)
+}
+
+func (e *PartialBackfillError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+
+	return e.Cause
+}
 
 var temporaryBanPattern = regexp.MustCompile(`(?i)your ip address has been temporarily banned.*?ban expires in [^<\n]+`)
 

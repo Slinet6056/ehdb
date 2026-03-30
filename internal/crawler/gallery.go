@@ -193,12 +193,20 @@ func (c *GalleryCrawler) Backfill(ctx context.Context) error {
 		return err
 	}
 
-	allItems, err := c.collectGalleryItemsInWindow(window)
-	if err != nil {
-		return err
+	allItems, collectErr := c.collectGalleryItemsInWindow(window)
+	if collectErr != nil && errors.Is(collectErr, ErrAuthRequired) {
+		return collectErr
+	}
+
+	if collectErr != nil && len(allItems) == 0 {
+		return collectErr
 	}
 
 	if len(allItems) == 0 {
+		if collectErr != nil {
+			return collectErr
+		}
+
 		c.logger.Info("no galleries discovered for backfill")
 		return nil
 	}
@@ -218,6 +226,10 @@ func (c *GalleryCrawler) Backfill(ctx context.Context) error {
 
 	if len(missingItems) == 0 {
 		c.logger.Info("no missing galleries found during backfill")
+		if collectErr != nil {
+			return c.buildPartialBackfillError(window, allItems, 0, 0, collectErr)
+		}
+
 		return nil
 	}
 
@@ -228,9 +240,15 @@ func (c *GalleryCrawler) Backfill(ctx context.Context) error {
 		return err
 	}
 
+	importedCount := countImportableMetadata(allMetadata)
+
 	importer := NewImporter(c.logger)
 	if err := importer.Import(ctx, allMetadata, false); err != nil {
 		return fmt.Errorf("import backfill data: %w", err)
+	}
+
+	if collectErr != nil {
+		return c.buildPartialBackfillError(window, allItems, len(missingItems), importedCount, collectErr)
 	}
 
 	return nil
@@ -348,18 +366,108 @@ func (c *GalleryCrawler) collectGalleryItemsInWindow(window backfillWindow) ([]G
 	c.logger.Debug("fetching normal pages for backfill window")
 	items, err := c.fetchPages(false, window.startPosted, window.endPosted, window.startNext)
 	if err != nil {
-		return nil, fmt.Errorf("fetch normal pages: %w", err)
+		if errors.Is(err, ErrAuthRequired) || len(items) == 0 {
+			return nil, fmt.Errorf("fetch normal pages: %w", err)
+		}
+
+		allItems = append(allItems, items...)
+		return dedupeGalleryItems(allItems), fmt.Errorf("fetch normal pages: %w", err)
 	}
 	allItems = append(allItems, items...)
 
 	c.logger.Debug("fetching expunged pages for backfill window")
 	items, err = c.fetchPages(true, window.startPosted, window.endPosted, window.startNext)
 	if err != nil {
-		return nil, fmt.Errorf("fetch expunged pages: %w", err)
+		if errors.Is(err, ErrAuthRequired) {
+			return nil, fmt.Errorf("fetch expunged pages: %w", err)
+		}
+
+		allItems = append(allItems, items...)
+		if len(allItems) == 0 {
+			return nil, fmt.Errorf("fetch expunged pages: %w", err)
+		}
+
+		return dedupeGalleryItems(allItems), fmt.Errorf("fetch expunged pages: %w", err)
 	}
 	allItems = append(allItems, items...)
 
 	return dedupeGalleryItems(allItems), nil
+}
+
+func countImportableMetadata(metadataList []database.GalleryMetadata) int {
+	count := 0
+	for _, metadata := range metadataList {
+		if metadata.Error != "" {
+			continue
+		}
+
+		count++
+	}
+
+	return count
+}
+
+func (c *GalleryCrawler) buildPartialBackfillError(window backfillWindow, allItems []GalleryListItem, missingCount, importedCount int, cause error) error {
+	resumeStart, resumeEnd, resumeOK := buildBackfillResumeWindow(window, allItems, c.parsePostedTime)
+	if resumeOK {
+		c.logger.Warn("gallery backfill partially completed",
+			zap.Int("discovered", len(allItems)),
+			zap.Int("missing", missingCount),
+			zap.Int("imported", importedCount),
+			zap.String("resume_start", resumeStart.UTC().Format(time.RFC3339)),
+			zap.String("resume_end", resumeEnd.UTC().Format(time.RFC3339)),
+			zap.Error(cause),
+		)
+
+		return &PartialBackfillError{
+			Cause:           cause,
+			ImportedCount:   importedCount,
+			DiscoveredCount: len(allItems),
+			MissingCount:    missingCount,
+			ResumeStart:     resumeStart,
+			ResumeEnd:       resumeEnd,
+		}
+	}
+
+	c.logger.Warn("gallery backfill partially completed without resumable window",
+		zap.Int("discovered", len(allItems)),
+		zap.Int("missing", missingCount),
+		zap.Int("imported", importedCount),
+		zap.Error(cause),
+	)
+
+	return fmt.Errorf("partial backfill interrupted after importing %d of %d missing galleries (%d discovered total): %w",
+		importedCount,
+		missingCount,
+		len(allItems),
+		cause,
+	)
+}
+
+func buildBackfillResumeWindow(window backfillWindow, items []GalleryListItem, parsePosted func(string) (int64, error)) (time.Time, time.Time, bool) {
+	oldestPosted := int64(0)
+	for _, item := range items {
+		posted, err := parsePosted(item.Posted)
+		if err != nil {
+			continue
+		}
+
+		if oldestPosted == 0 || posted < oldestPosted {
+			oldestPosted = posted
+		}
+	}
+
+	if oldestPosted <= 0 {
+		return time.Time{}, time.Time{}, false
+	}
+
+	resumeStart := time.Unix(window.startPosted, 0).UTC()
+	resumeEnd := time.Unix(oldestPosted, 0).UTC()
+	if !resumeStart.Before(resumeEnd) {
+		return time.Time{}, time.Time{}, false
+	}
+
+	return resumeStart, resumeEnd, true
 }
 
 func dedupeGalleryItems(items []GalleryListItem) []GalleryListItem {
@@ -513,7 +621,7 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64, endPosted i
 		})
 
 		if err != nil {
-			return nil, fmt.Errorf("fetch page %d: %w", page, err)
+			return allItems, fmt.Errorf("fetch page %d: %w", page, err)
 		}
 
 		c.logger.Debug("parsed gallery page",
