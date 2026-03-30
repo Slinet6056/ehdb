@@ -1,9 +1,9 @@
-name: Monthly Deep Resync
+name: Backfill Database
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 16 1 * *"
+    - cron: "0 16 * * 0"
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  resync:
+  backfill:
     runs-on: self-hosted
     timeout-minutes: 7200
 
@@ -69,15 +69,10 @@ jobs:
           log_level: info
           EOF
 
-      - name: Resync galleries from last 3 months
+      - name: Backfill galleries from last 3 months
         run: |
-          echo "Resyncing galleries from last 90 days..."
-          ./bin/ehdb-sync resync -config config.yaml -hours 2160
-
-      - name: Mark replaced galleries
-        run: |
-          echo "Marking replaced galleries..."
-          ./bin/ehdb-sync mark-replaced -config config.yaml
+          echo "Backfilling missing galleries from the last 90 days..."
+          ./bin/ehdb-sync backfill -config config.yaml -offset 2160
 
       - name: Persist crawler cookies to 1Password
         if: always() && hashFiles('cookies.json') != '' && vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != ''
@@ -118,7 +113,6 @@ jobs:
         run: |
           echo "Generating database statistics..."
 
-          # Collect statistics data
           TOTAL_GALLERIES=$(PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} psql -h ${{ secrets.POSTGRES_HOST }} \
             -p ${{ secrets.POSTGRES_PORT }} -U ${{ secrets.POSTGRES_USER }} \
             -d ${{ secrets.POSTGRES_DATABASE }} -t -c "SELECT COUNT(*) FROM gallery;" | xargs)
@@ -139,8 +133,7 @@ jobs:
             -p ${{ secrets.POSTGRES_PORT }} -U ${{ secrets.POSTGRES_USER }} \
             -d ${{ secrets.POSTGRES_DATABASE }} -t -c "SELECT pg_size_pretty(pg_database_size('${{ secrets.POSTGRES_DATABASE }}'));" | xargs)
 
-          # Generate markdown formatted statistics report
-          cat > resync_stats.txt << EOF
+          cat > backfill_stats.txt << EOF
           ## 📦 Database Import
 
           \`\`\`bash
@@ -176,29 +169,28 @@ jobs:
           |----------|-------|
           EOF
 
-          # Add category statistics
           PGPASSWORD=${{ secrets.POSTGRES_PASSWORD }} psql -h ${{ secrets.POSTGRES_HOST }} \
             -p ${{ secrets.POSTGRES_PORT }} -U ${{ secrets.POSTGRES_USER }} \
             -d ${{ secrets.POSTGRES_DATABASE }} -t -A -F'|' \
             -c "SELECT category, COUNT(*) as count FROM gallery WHERE expunged = FALSE GROUP BY category ORDER BY count DESC;" \
             | while IFS='|' read -r category count; do
-              echo "| ${category} | ${count} |" >> resync_stats.txt
+              echo "| ${category} | ${count} |" >> backfill_stats.txt
             done
 
-          echo "" >> resync_stats.txt
-          echo "---" >> resync_stats.txt
-          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> resync_stats.txt
-          echo "" >> resync_stats.txt
-          echo "**Sync Type:** Monthly Deep Resync (3 months of existing galleries)" >> resync_stats.txt
+          echo "" >> backfill_stats.txt
+          echo "---" >> backfill_stats.txt
+          echo "*Last updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')*" >> backfill_stats.txt
+          echo "" >> backfill_stats.txt
+          echo "**Sync Type:** Weekly Backfill Sync (3 months of missing galleries)" >> backfill_stats.txt
 
-          cat resync_stats.txt
+          cat backfill_stats.txt
 
       - name: Update Live Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: live
           name: Live Sync Database
-          body_path: resync_stats.txt
+          body_path: backfill_stats.txt
           draft: false
           prerelease: false
           make_latest: true
@@ -209,5 +201,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -f cookies.json ehentai_db.dump config.yaml op-item-create.json op-item.json resync_stats.txt
+          rm -f cookies.json ehentai_db.dump config.yaml op-item-create.json op-item.json backfill_stats.txt
           echo "Cleanup completed"

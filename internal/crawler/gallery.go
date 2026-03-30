@@ -45,6 +45,8 @@ type GalleryListItem struct {
 	Posted string
 }
 
+const consecutiveOldPagesLimit = 3
+
 // GetPages fetches a page of galleries
 func (c *GalleryCrawler) GetPages(next string, expunged bool) ([]GalleryListItem, error) {
 	url := fmt.Sprintf("https://%s/?next=%s&f_cats=0&advsearch=1&f_sname=on&f_stags=on", c.cfg.Host, next)
@@ -142,38 +144,15 @@ func (c *GalleryCrawler) GetLastPosted(ctx context.Context) (int64, error) {
 func (c *GalleryCrawler) Sync(ctx context.Context) error {
 	c.logger.Info("starting gallery sync")
 
-	// Get last posted time
-	lastPosted, err := c.GetLastPosted(ctx)
+	thresholdPosted, err := c.getSyncThreshold(ctx)
 	if err != nil {
-		c.logger.Warn("failed to get last posted, starting from 0", zap.Error(err))
-		lastPosted = 0
+		return err
 	}
 
-	c.logger.Info("got last posted time", zap.Int64("posted", lastPosted))
-
-	// Apply offset if configured
-	if c.cfg.Offset != 0 {
-		lastPosted -= int64(c.cfg.Offset * 3600)
-		c.logger.Info("applied offset", zap.Int64("new_posted", lastPosted))
-	}
-
-	var allItems []GalleryListItem
-
-	// Fetch normal pages
-	c.logger.Debug("fetching normal pages")
-	items, err := c.fetchPages(false, lastPosted)
+	allItems, err := c.collectGalleryItems(thresholdPosted)
 	if err != nil {
-		return fmt.Errorf("fetch normal pages: %w", err)
+		return err
 	}
-	allItems = append(allItems, items...)
-
-	// Fetch expunged pages
-	c.logger.Debug("fetching expunged pages")
-	items, err = c.fetchPages(true, lastPosted)
-	if err != nil {
-		return fmt.Errorf("fetch expunged pages: %w", err)
-	}
-	allItems = append(allItems, items...)
 
 	if len(allItems) == 0 {
 		c.logger.Info("no new galleries available")
@@ -183,18 +162,140 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 	c.logger.Info("found new galleries", zap.Int("count", len(allItems)))
 	c.logGidRange("total", allItems)
 
-	// Sort by gid
-	// (skipping sort for simplicity, items are already chronologically ordered)
+	allMetadata, err := c.fetchMetadataForItems(allItems)
+	if err != nil {
+		return err
+	}
 
-	// Fetch metadata in batches of 25
+	// Import data
+	importer := NewImporter(c.logger)
+	if err := importer.Import(ctx, allMetadata, c.cfg.Offset != 0); err != nil {
+		return fmt.Errorf("import data: %w", err)
+	}
+
+	return nil
+}
+
+func (c *GalleryCrawler) Backfill(ctx context.Context) error {
+	c.logger.Info("starting gallery backfill")
+
+	thresholdPosted, err := c.getSyncThreshold(ctx)
+	if err != nil {
+		return err
+	}
+
+	allItems, err := c.collectGalleryItems(thresholdPosted)
+	if err != nil {
+		return err
+	}
+
+	if len(allItems) == 0 {
+		c.logger.Info("no galleries discovered for backfill")
+		return nil
+	}
+
+	c.logger.Info("discovered galleries for backfill", zap.Int("count", len(allItems)))
+	c.logGidRange("backfill_discovered", allItems)
+
+	missingItems, err := c.filterMissingItems(ctx, allItems)
+	if err != nil {
+		return fmt.Errorf("filter missing galleries: %w", err)
+	}
+
+	c.logger.Info("identified missing galleries for backfill",
+		zap.Int("missing", len(missingItems)),
+		zap.Int("existing", len(allItems)-len(missingItems)),
+	)
+
+	if len(missingItems) == 0 {
+		c.logger.Info("no missing galleries found during backfill")
+		return nil
+	}
+
+	c.logGidRange("backfill_missing", missingItems)
+
+	allMetadata, err := c.fetchMetadataForItems(missingItems)
+	if err != nil {
+		return err
+	}
+
+	importer := NewImporter(c.logger)
+	if err := importer.Import(ctx, allMetadata, false); err != nil {
+		return fmt.Errorf("import backfill data: %w", err)
+	}
+
+	return nil
+}
+
+func (c *GalleryCrawler) getSyncThreshold(ctx context.Context) (int64, error) {
+	lastPosted, err := c.GetLastPosted(ctx)
+	if err != nil {
+		c.logger.Warn("failed to get last posted, starting from 0", zap.Error(err))
+		lastPosted = 0
+	}
+
+	c.logger.Info("got last posted time", zap.Int64("posted", lastPosted))
+
+	if c.cfg.Offset != 0 {
+		lastPosted -= int64(c.cfg.Offset * 3600)
+		c.logger.Info("applied offset", zap.Int64("new_posted", lastPosted))
+	}
+
+	return normalizePostedThreshold(lastPosted), nil
+}
+
+func normalizePostedThreshold(posted int64) int64 {
+	if posted <= 0 {
+		return posted
+	}
+
+	return posted - (posted % 60)
+}
+
+func (c *GalleryCrawler) collectGalleryItems(thresholdPosted int64) ([]GalleryListItem, error) {
+	var allItems []GalleryListItem
+
+	c.logger.Debug("fetching normal pages")
+	items, err := c.fetchPages(false, thresholdPosted)
+	if err != nil {
+		return nil, fmt.Errorf("fetch normal pages: %w", err)
+	}
+	allItems = append(allItems, items...)
+
+	c.logger.Debug("fetching expunged pages")
+	items, err = c.fetchPages(true, thresholdPosted)
+	if err != nil {
+		return nil, fmt.Errorf("fetch expunged pages: %w", err)
+	}
+	allItems = append(allItems, items...)
+
+	return dedupeGalleryItems(allItems), nil
+}
+
+func dedupeGalleryItems(items []GalleryListItem) []GalleryListItem {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]GalleryListItem, 0, len(items))
+
+	for _, item := range items {
+		if _, ok := seen[item.Gid]; ok {
+			continue
+		}
+		seen[item.Gid] = struct{}{}
+		result = append(result, item)
+	}
+
+	return result
+}
+
+func (c *GalleryCrawler) fetchMetadataForItems(items []GalleryListItem) ([]database.GalleryMetadata, error) {
 	var allMetadata []database.GalleryMetadata
-	for i := 0; i < len(allItems); i += 25 {
+	for i := 0; i < len(items); i += 25 {
 		end := i + 25
-		if end > len(allItems) {
-			end = len(allItems)
+		if end > len(items) {
+			end = len(items)
 		}
 
-		batch := allItems[i:end]
+		batch := items[i:end]
 		var gidlist [][2]interface{}
 		for _, item := range batch {
 			gid, _ := strconv.Atoi(item.Gid)
@@ -213,27 +314,90 @@ func (c *GalleryCrawler) Sync(ctx context.Context) error {
 
 		if err != nil {
 			if errors.Is(err, ErrAuthRequired) {
-				return fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
+				return nil, fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
 			}
 			c.logger.Error("failed to fetch metadata batch", zap.Error(err))
 			continue
 		}
 
 		allMetadata = append(allMetadata, metadata...)
-
-		// Rate limiting for API calls
 		time.Sleep(time.Duration(c.cfg.APIDelaySeconds) * time.Second)
 	}
 
 	c.logger.Debug("fetched all metadata", zap.Int("count", len(allMetadata)))
+	return allMetadata, nil
+}
 
-	// Import data
-	importer := NewImporter(c.logger)
-	if err := importer.Import(ctx, allMetadata, c.cfg.Offset != 0); err != nil {
-		return fmt.Errorf("import data: %w", err)
+func (c *GalleryCrawler) filterMissingItems(ctx context.Context, items []GalleryListItem) ([]GalleryListItem, error) {
+	existingGIDs, err := c.getExistingGalleryIDs(ctx, items)
+	if err != nil {
+		return nil, err
 	}
 
-	return nil
+	missing := make([]GalleryListItem, 0, len(items))
+	for _, item := range items {
+		gid, err := strconv.Atoi(item.Gid)
+		if err != nil {
+			c.logger.Warn("failed to parse gid while filtering missing galleries", zap.String("gid", item.Gid), zap.Error(err))
+			continue
+		}
+		if _, ok := existingGIDs[gid]; ok {
+			continue
+		}
+		missing = append(missing, item)
+	}
+
+	return missing, nil
+}
+
+func (c *GalleryCrawler) getExistingGalleryIDs(ctx context.Context, items []GalleryListItem) (map[int]struct{}, error) {
+	pool := database.GetPool()
+	existing := make(map[int]struct{})
+
+	const batchSize = 1000
+	for start := 0; start < len(items); start += batchSize {
+		end := start + batchSize
+		if end > len(items) {
+			end = len(items)
+		}
+
+		gids := make([]int, 0, end-start)
+		for _, item := range items[start:end] {
+			gid, err := strconv.Atoi(item.Gid)
+			if err != nil {
+				c.logger.Warn("failed to parse gid while building lookup batch", zap.String("gid", item.Gid), zap.Error(err))
+				continue
+			}
+			gids = append(gids, gid)
+		}
+
+		if len(gids) == 0 {
+			continue
+		}
+
+		rows, err := pool.Query(ctx, `SELECT gid FROM gallery WHERE gid = ANY($1)`, gids)
+		if err != nil {
+			return nil, err
+		}
+
+		for rows.Next() {
+			var gid int
+			if err := rows.Scan(&gid); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			existing[gid] = struct{}{}
+		}
+
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+
+		rows.Close()
+	}
+
+	return existing, nil
 }
 
 // fetchPages fetches all pages until reaching lastPosted
@@ -241,6 +405,7 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 	var allItems []GalleryListItem
 	next := ""
 	page := 0
+	consecutiveOldPages := 0
 
 	for {
 		c.logger.Debug("fetching page",
@@ -264,8 +429,7 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 			break
 		}
 
-		// Check each item's posted time
-		finish := false
+		pageHasRecentItems := false
 		for _, item := range items {
 			// Parse posted time: "2024-01-01 12:00" -> timestamp
 			posted, err := c.parsePostedTime(item.Posted)
@@ -274,15 +438,21 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64) ([]GalleryL
 				continue
 			}
 
-			if posted > lastPosted {
+			if posted >= lastPosted {
 				allItems = append(allItems, item)
+				pageHasRecentItems = true
 			} else {
-				finish = true
-				break
+				continue
 			}
 		}
 
-		if finish {
+		if pageHasRecentItems {
+			consecutiveOldPages = 0
+		} else {
+			consecutiveOldPages++
+		}
+
+		if consecutiveOldPages >= consecutiveOldPagesLimit {
 			break
 		}
 

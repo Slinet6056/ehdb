@@ -40,6 +40,8 @@ func main() {
 	switch command {
 	case "sync":
 		runSync(log, os.Args[2:])
+	case "backfill":
+		runBackfill(log, os.Args[2:])
 	case "resync":
 		runResync(log, os.Args[2:])
 	case "fetch":
@@ -62,6 +64,8 @@ func printUsage() {
 	fmt.Println("\nCommands:")
 	fmt.Println("  sync              Sync latest galleries from E-Hentai")
 	fmt.Println("                    Options: -config <path> -host <host> -offset <hours>")
+	fmt.Println("  backfill          Backfill missing galleries from the list replay window")
+	fmt.Println("                    Options: -config <path> -host <host> -offset <hours>")
 	fmt.Println("  resync            Resync galleries from recent hours")
 	fmt.Println("                    Options: -config <path> -hours <N>")
 	fmt.Println("  fetch             Manually fetch specific galleries")
@@ -77,6 +81,7 @@ func printUsage() {
 	fmt.Println("                    Options: -config <path>")
 	fmt.Println("\nExamples:")
 	fmt.Println("  ehdb-sync sync -host e-hentai.org -offset 2")
+	fmt.Println("  ehdb-sync backfill -host e-hentai.org -offset 2160")
 	fmt.Println("  ehdb-sync resync -hours 24")
 	fmt.Println("  ehdb-sync fetch 123456/abcdef0123 234567/bcdef01234")
 	fmt.Println("  ehdb-sync torrent-sync")
@@ -121,6 +126,44 @@ func runSync(logger *zap.Logger, args []string) {
 		logger.Fatal("gallery sync failed", zap.Error(err))
 	}
 	logger.Info("gallery sync completed successfully")
+}
+
+func runBackfill(logger *zap.Logger, args []string) {
+	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
+	configPath := fs.String("config", "config.yaml", "path to config file")
+	host := fs.String("host", "", "e-hentai.org or exhentai.org (overrides config)")
+	offset := fs.Int("offset", 720, "time offset in hours")
+	if err := fs.Parse(args); err != nil {
+		logger.Fatal("failed to parse flags", zap.Error(err))
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		logger.Fatal("failed to load config", zap.Error(err))
+	}
+
+	if *host != "" {
+		cfg.Crawler.Host = *host
+	}
+	if *offset != 0 {
+		cfg.Crawler.Offset = *offset
+	}
+
+	if err := database.Init(&cfg.Database, logger); err != nil {
+		logger.Fatal("failed to initialize database", zap.Error(err))
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+	galleryCrawler, err := crawler.NewGalleryCrawler(&cfg.Crawler, logger)
+	if err != nil {
+		logger.Fatal("failed to create gallery crawler", zap.Error(err))
+	}
+
+	if err := galleryCrawler.Backfill(ctx); err != nil {
+		logger.Fatal("gallery backfill failed", zap.Error(err))
+	}
+	logger.Info("gallery backfill completed successfully")
 }
 
 // runResync resyncs galleries from recent hours

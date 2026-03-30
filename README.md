@@ -73,7 +73,7 @@ createdb -U postgres ehentai_db
 pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.dump
 ```
 
-> **Note**: The live database is automatically updated every 6 hours via [sync workflow](.github/workflows/sync-database.yml) and deep resynced monthly via [monthly resync workflow](.github/workflows/monthly-resync.yml).
+> **Note**: The live database is automatically updated every 6 hours via [sync workflow](.github/workflows/sync-database.yml), backfilled weekly via [backfill workflow](.github/workflows/backfill-database.yml), and deep resynced monthly via [monthly resync workflow](.github/workflows/monthly-resync.yml).
 
 **2. Nightly Migration Database (Alternative)**
 
@@ -123,7 +123,7 @@ The `ehdb-sync` command provides multiple synchronization operations:
 
 #### Sync Latest Galleries
 
-Synchronize the latest galleries from E-Hentai/ExHentai (crawls from the front page until reaching already synced content):
+Synchronize the latest galleries from E-Hentai/ExHentai. When `-offset` is set, the crawler replays a recent window and uses a more tolerant stop condition so deep scans do not stop at the first older entry:
 
 ```bash
 ./bin/ehdb-sync sync -host e-hentai.org -offset 2
@@ -134,6 +134,20 @@ Synchronize the latest galleries from E-Hentai/ExHentai (crawls from the front p
 - `-config`: Config file path (optional, default: `config.yaml`)
 - `-host`: Specify the site - `e-hentai.org` or `exhentai.org` (optional, overrides config)
 - `-offset`: Re-crawl galleries from the last N hours in the database (optional, default: 0, useful for refreshing recently updated data)
+
+#### Backfill Missing Galleries
+
+Replay the gallery list within a time window, compare discovered galleries against the database, and import only missing gids:
+
+```bash
+./bin/ehdb-sync backfill -offset 2160
+```
+
+**Parameters:**
+
+- `-config`: Config file path (optional, default: `config.yaml`)
+- `-host`: Specify the site - `e-hentai.org` or `exhentai.org` (optional, overrides config)
+- `-offset`: Replay window in hours used to discover missing galleries (optional, default: 720)
 
 #### Resync Recent Galleries
 
