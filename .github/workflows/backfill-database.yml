@@ -78,7 +78,7 @@ jobs:
           log_level: info
           EOF
 
-      - name: Backfill galleries from last 3 months
+      - name: Resolve backfill parameters
         env:
           INPUT_START_TIME: ${{ github.event.inputs.start_time }}
           INPUT_END_TIME: ${{ github.event.inputs.end_time }}
@@ -104,6 +104,8 @@ jobs:
               print(f"BACKFILL_END={end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}")
           PY
 
+      - name: Run backfill galleries
+        run: |
           if [ "$BACKFILL_MODE" = "window" ]; then
             echo "Backfilling missing galleries from ${BACKFILL_START} to ${BACKFILL_END}..."
             ./bin/ehdb-sync backfill -config config.yaml -start "$BACKFILL_START" -end "$BACKFILL_END"
