@@ -217,6 +217,9 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 			if errors.Is(err, ErrAuthRequired) {
 				return fmt.Errorf("auth failed while processing gallery %d torrents: %w", gid, err)
 			}
+			if isTemporaryBanError(err) {
+				return fmt.Errorf("temporary ban detected while processing gallery %d torrents: %w", gid, err)
+			}
 			c.logger.Error("failed to process gallery torrents", zap.Int("gid", gid), zap.Error(err))
 			continue
 		}
@@ -457,6 +460,9 @@ func (c *TorrentCrawler) importMissingGalleries(ctx context.Context, items []Tor
 		if err != nil {
 			if errors.Is(err, ErrAuthRequired) {
 				return fmt.Errorf("auth failed while fetching metadata batch %d-%d: %w", i, end, err)
+			}
+			if isTemporaryBanError(err) {
+				return fmt.Errorf("temporary ban detected while fetching metadata batch %d-%d: %w", i, end, err)
 			}
 			c.logger.Error("failed to fetch metadata batch", zap.Error(err))
 			continue

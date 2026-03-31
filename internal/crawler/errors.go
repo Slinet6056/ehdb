@@ -62,6 +62,15 @@ func extractTemporaryBanMessage(content string) (string, bool) {
 	return strings.TrimSpace(match), true
 }
 
+func isTemporaryBanError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	_, ok := extractTemporaryBanMessage(err.Error())
+	return ok
+}
+
 func isAuthFailureBody(body []byte) (string, bool) {
 	content := strings.ToLower(string(body))
 

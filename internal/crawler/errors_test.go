@@ -123,3 +123,36 @@ func TestAbnormalGalleryListPageReason(t *testing.T) {
 		})
 	}
 }
+
+func TestIsTemporaryBanError(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantHit bool
+	}{
+		{
+			name:    "temporary ban message",
+			err:     errors.New("torrent page abnormal: Your IP address has been temporarily banned. (The ban expires in 4 minutes and 58 seconds): abnormal page response"),
+			wantHit: true,
+		},
+		{
+			name:    "cloudflare challenge only",
+			err:     errors.New("torrent page abnormal: cloudflare: abnormal page response"),
+			wantHit: false,
+		},
+		{
+			name:    "nil error",
+			err:     nil,
+			wantHit: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTemporaryBanError(tt.err)
+			if got != tt.wantHit {
+				t.Fatalf("unexpected temporary ban result: got %v want %v", got, tt.wantHit)
+			}
+		})
+	}
+}
