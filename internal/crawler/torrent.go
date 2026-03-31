@@ -289,6 +289,13 @@ func (c *TorrentCrawler) fetchTorrentListPage(page int) ([]TorrentListItem, erro
 		}
 	}
 
+	if len(items) == 0 {
+		if reason, ok := abnormalTorrentListPageReason(body); ok {
+			reason = enrichAbnormalReasonWithAPIProbe(reason, c.client, c.logger)
+			return nil, fmt.Errorf("torrent list page abnormal: %s: %w", reason, ErrAbnormalPage)
+		}
+	}
+
 	return items, nil
 }
 
@@ -314,6 +321,11 @@ func (c *TorrentCrawler) processTorrentsForGallery(ctx context.Context, gid int,
 	if strings.Contains(bodyStr, "Gallery not found") {
 		c.logger.Debug("gallery not found (pending refresh)", zap.Int("gid", gid))
 		return 0, nil
+	}
+
+	if reason, ok := suspectedAbnormalWebPageReason(body); ok {
+		reason = enrichAbnormalReasonWithAPIProbe(reason, c.client, c.logger)
+		return 0, fmt.Errorf("torrent page abnormal: %s: %w", reason, ErrAbnormalPage)
 	}
 
 	// Parse root gid from announce URL

@@ -81,6 +81,7 @@ func (c *GalleryCrawler) GetPages(next string, expunged bool) ([]GalleryListItem
 
 	if len(items) == 0 {
 		if reason, ok := abnormalGalleryListPageReason(body); ok {
+			reason = enrichAbnormalReasonWithAPIProbe(reason, c.client, c.logger)
 			return nil, fmt.Errorf("gallery list page abnormal: %s: %w", reason, ErrAbnormalPage)
 		}
 
@@ -103,7 +104,7 @@ func (c *GalleryCrawler) GetMetadatas(gidlist [][2]interface{}) ([]database.Gall
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	body, err := c.client.Post("https://api.e-hentai.org/api.php", jsonData)
+	body, err := c.client.Post(c.client.apiURL(), jsonData)
 	if err != nil {
 		return nil, err
 	}

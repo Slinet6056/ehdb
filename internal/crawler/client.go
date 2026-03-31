@@ -274,6 +274,16 @@ func (c *Client) validateResponse(resp *http.Response, body []byte) error {
 	return nil
 }
 
+func (c *Client) apiURL() string {
+	host := strings.ToLower(c.host)
+	switch host {
+	case "e-hentai.org", "exhentai.org":
+		return "https://api.e-hentai.org/api.php"
+	default:
+		return fmt.Sprintf("https://%s/api.php", c.host)
+	}
+}
+
 // Get performs a GET request
 func (c *Client) Get(url string) ([]byte, error) {
 	req, err := http.NewRequest("GET", url, nil)

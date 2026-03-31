@@ -49,6 +49,19 @@ func (e *PartialBackfillError) Unwrap() error {
 
 var temporaryBanPattern = regexp.MustCompile(`(?i)your ip address has been temporarily banned.*?ban expires in [^<\n]+`)
 
+func extractTemporaryBanMessage(content string) (string, bool) {
+	if content == "" {
+		return "", false
+	}
+
+	match := temporaryBanPattern.FindString(content)
+	if match == "" {
+		return "", false
+	}
+
+	return strings.TrimSpace(match), true
+}
+
 func isAuthFailureBody(body []byte) (string, bool) {
 	content := strings.ToLower(string(body))
 
@@ -78,7 +91,7 @@ func abnormalGalleryListPageReason(body []byte) (string, bool) {
 	}
 
 	lowerContent := strings.ToLower(trimmed)
-	if match := temporaryBanPattern.FindString(trimmed); match != "" {
+	if match, ok := extractTemporaryBanMessage(trimmed); ok {
 		return match, true
 	}
 
@@ -109,6 +122,54 @@ func abnormalGalleryListPageReason(body []byte) (string, bool) {
 
 	if !hasGalleryListStructure {
 		return "missing expected gallery list structure", true
+	}
+
+	return "", false
+}
+
+func suspectedAbnormalWebPageReason(body []byte) (string, bool) {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return "received blank page", true
+	}
+
+	if match, ok := extractTemporaryBanMessage(trimmed); ok {
+		return match, true
+	}
+
+	lowerContent := strings.ToLower(trimmed)
+	abnormalMarkers := []string{
+		"your ip address has been temporarily banned",
+		"ban expires in",
+		"attention required",
+		"just a moment",
+		"checking your browser before accessing",
+		"captcha",
+		"cloudflare",
+		"ddos-guard",
+		"access denied",
+	}
+
+	for _, marker := range abnormalMarkers {
+		if strings.Contains(lowerContent, marker) {
+			return marker, true
+		}
+	}
+
+	return "", false
+}
+
+func abnormalTorrentListPageReason(body []byte) (string, bool) {
+	if reason, ok := suspectedAbnormalWebPageReason(body); ok {
+		return reason, true
+	}
+
+	lowerContent := strings.ToLower(strings.TrimSpace(string(body)))
+	hasTorrentListStructure := strings.Contains(lowerContent, "gallerytorrents.php?gid=") ||
+		strings.Contains(lowerContent, "gtid=")
+
+	if !hasTorrentListStructure {
+		return "missing expected torrent list structure", true
 	}
 
 	return "", false

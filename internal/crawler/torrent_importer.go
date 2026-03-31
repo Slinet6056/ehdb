@@ -161,6 +161,11 @@ func (ti *TorrentImporter) processGallery(ctx context.Context, gid int, token st
 		}
 	}
 
+	if reason, ok := suspectedAbnormalWebPageReason(body); ok {
+		reason = enrichAbnormalReasonWithAPIProbe(reason, ti.client, ti.logger)
+		return 0, fmt.Errorf("torrent page abnormal: %s: %w", reason, ErrAbnormalPage)
+	}
+
 	// Parse root gid from announce URL
 	announcePattern := regexp.MustCompile(`/(\d+)/announce`)
 	announceMatches := announcePattern.FindStringSubmatch(bodyStr)
