@@ -136,8 +136,16 @@ jobs:
             rm -f op-item.json
           fi
           if [ -f op-item.json ]; then
-            python .github/scripts/prepare_op_item.py --mode update --item-path op-item.json
-            op item edit "$OP_COOKIES_ITEM" --vault "$OP_COOKIES_VAULT" --template op-item.json </dev/null > /dev/null
+            if python .github/scripts/prepare_op_item.py --mode update --item-path op-item.json; then
+              op item edit "$OP_COOKIES_ITEM" --vault "$OP_COOKIES_VAULT" --template op-item.json </dev/null > /dev/null
+            else
+              status=$?
+              if [ "$status" -eq 10 ]; then
+                echo "Crawler cookies unchanged, skipping 1Password update"
+              else
+                exit "$status"
+              fi
+            fi
           else
             op item template get "Secure Note" > op-item-create.json
             chmod 600 op-item-create.json
