@@ -52,6 +52,11 @@ func TestResolveBackfillWindow(t *testing.T) {
 			name:    "missing all window args returns error",
 			wantErr: "either -offset or -start must be provided",
 		},
+		{
+			name:        "negative offset returns error",
+			offsetHours: -1,
+			wantErr:     "-offset must be greater than 0",
+		},
 	}
 
 	for _, tt := range tests {

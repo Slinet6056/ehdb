@@ -15,6 +15,12 @@ import (
 	"go.uber.org/zap"
 )
 
+type torrentImportGallery struct {
+	Gid    int
+	Token  string
+	Posted time.Time
+}
+
 // TorrentImporter imports torrents from all galleries
 type TorrentImporter struct {
 	client     *Client
@@ -42,43 +48,9 @@ func NewTorrentImporter(cfg *config.CrawlerConfig, logger *zap.Logger) (*Torrent
 func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 	ti.logger.Warn("starting torrent import - this may take a long time")
 
-	pool := database.GetPool()
-
-	// Get all galleries without root_gid and not removed
-	query := `
-		SELECT gid, token, posted
-		FROM gallery
-		WHERE root_gid IS NULL AND removed = false
-		ORDER BY gid ASC
-	`
-
-	ti.logger.Debug("executing query",
-		zap.String("sql", utils.FormatSQL(query)),
-	)
-
-	rows, err := pool.Query(ctx, query)
+	galleries, err := ti.loadGalleriesToImport(ctx)
 	if err != nil {
-		return fmt.Errorf("query galleries: %w", err)
-	}
-	defer rows.Close()
-
-	var galleries []struct {
-		Gid    int
-		Token  string
-		Posted time.Time
-	}
-
-	for rows.Next() {
-		var g struct {
-			Gid    int
-			Token  string
-			Posted time.Time
-		}
-		if err := rows.Scan(&g.Gid, &g.Token, &g.Posted); err != nil {
-			ti.logger.Warn("failed to scan gallery", zap.Error(err))
-			continue
-		}
-		galleries = append(galleries, g)
+		return err
 	}
 
 	ti.logger.Info("found galleries to process", zap.Int("count", len(galleries)))
@@ -126,6 +98,64 @@ func (ti *TorrentImporter) ImportAll(ctx context.Context) error {
 		zap.Int("new_torrents", newTorrents),
 	)
 	return nil
+}
+
+func (ti *TorrentImporter) loadGalleriesToImport(ctx context.Context) ([]torrentImportGallery, error) {
+	pool := database.GetPool()
+	query, args := buildTorrentImportGalleryQuery(ti.cfg)
+
+	logArgs := make([]interface{}, 0, len(args))
+	for _, arg := range args {
+		logArgs = append(logArgs, arg)
+	}
+
+	ti.logger.Debug("executing query",
+		zap.String("sql", utils.FormatSQL(query, logArgs...)),
+	)
+
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query galleries: %w", err)
+	}
+	defer rows.Close()
+
+	var galleries []torrentImportGallery
+	for rows.Next() {
+		var gallery torrentImportGallery
+		if err := rows.Scan(&gallery.Gid, &gallery.Token, &gallery.Posted); err != nil {
+			ti.logger.Warn("failed to scan gallery", zap.Error(err))
+			continue
+		}
+		galleries = append(galleries, gallery)
+	}
+
+	return galleries, nil
+}
+
+func buildTorrentImportGalleryQuery(cfg *config.CrawlerConfig) (string, []interface{}) {
+	query := `
+		SELECT gid, token, posted
+		FROM gallery
+		WHERE root_gid IS NULL AND removed = false
+	`
+
+	var args []interface{}
+	if cfg != nil && cfg.BackfillStart > 0 && cfg.BackfillEnd > 0 {
+		query += `
+		  AND posted >= $1
+		  AND posted <= $2
+		`
+		args = append(args,
+			time.Unix(cfg.BackfillStart, 0).UTC(),
+			time.Unix(cfg.BackfillEnd, 0).UTC(),
+		)
+	}
+
+	query += `
+		ORDER BY gid ASC
+	`
+
+	return query, args
 }
 
 // processGallery processes a single gallery, returns count of new torrents

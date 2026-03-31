@@ -80,8 +80,8 @@ func printUsage() {
 	fmt.Println("                    Options: -config <path> -host <host> -pages <N> -status <s> -search <keyword>")
 	fmt.Println("                    Automatically imports missing galleries")
 	fmt.Println("  torrent-import    Import torrents for existing galleries")
-	fmt.Println("                    Options: -config <path> -host <host>")
-	fmt.Println("                    Only processes galleries with root_gid = NULL")
+	fmt.Println("                    Options: -config <path> -host <host> [-offset <hours> | -start <time> [-end <time>]]")
+	fmt.Println("                    Only processes galleries with root_gid = NULL and removed = false")
 	fmt.Println("  mark-replaced     Mark all replaced galleries")
 	fmt.Println("                    Options: -config <path>")
 	fmt.Println("\nExamples:")
@@ -93,6 +93,7 @@ func printUsage() {
 	fmt.Println("  ehdb-sync torrent-sync")
 	fmt.Println("  ehdb-sync torrent-sync -pages 5")
 	fmt.Println("  ehdb-sync torrent-import")
+	fmt.Println("  ehdb-sync torrent-import -offset 2160")
 }
 
 // runSync syncs latest galleries
@@ -181,6 +182,9 @@ func runBackfill(logger *zap.Logger, args []string) {
 func resolveBackfillWindow(startRaw, endRaw string, offsetHours int) (time.Time, time.Time, error) {
 	hasStart := startRaw != ""
 	hasEnd := endRaw != ""
+	if offsetHours < 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("-offset must be greater than 0")
+	}
 	hasOffset := offsetHours > 0
 
 	if hasOffset && (hasStart || hasEnd) {
@@ -367,11 +371,12 @@ func runTorrentImport(logger *zap.Logger, args []string) {
 	fs := flag.NewFlagSet("torrent-import", flag.ExitOnError)
 	configPath := fs.String("config", "config.yaml", "path to config file")
 	host := fs.String("host", "", "e-hentai.org or exhentai.org (overrides config)")
+	start := fs.String("start", "", "torrent import window start time (RFC3339, 2006-01-02 15:04, or 2006-01-02)")
+	end := fs.String("end", "", "torrent import window end time (RFC3339, 2006-01-02 15:04, or 2006-01-02)")
+	offset := fs.Int("offset", 0, "torrent import window offset in hours")
 	if err := fs.Parse(args); err != nil {
 		logger.Fatal("failed to parse flags", zap.Error(err))
 	}
-
-	logger.Warn("torrent-import is a heavy operation that will scan all galleries")
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -380,6 +385,23 @@ func runTorrentImport(logger *zap.Logger, args []string) {
 
 	if *host != "" {
 		cfg.Crawler.Host = *host
+	}
+
+	hasWindowArgs := *offset > 0 || *start != "" || *end != ""
+	if hasWindowArgs {
+		startTime, endTime, err := resolveBackfillWindow(*start, *end, *offset)
+		if err != nil {
+			logger.Fatal("failed to resolve torrent import window", zap.Error(err))
+		}
+		cfg.Crawler.BackfillStart = startTime.Unix()
+		cfg.Crawler.BackfillEnd = endTime.Unix()
+
+		logger.Warn("torrent-import remains a heavy operation within the requested window",
+			zap.String("start", startTime.UTC().Format(time.RFC3339)),
+			zap.String("end", endTime.UTC().Format(time.RFC3339)),
+		)
+	} else {
+		logger.Warn("torrent-import is a heavy operation that will scan all galleries")
 	}
 
 	if err := database.Init(&cfg.Database, logger); err != nil {

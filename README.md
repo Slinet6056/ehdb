@@ -205,18 +205,25 @@ Synchronize torrent information from the torrent list page (crawls until reachin
 
 #### Import Torrents
 
-Scan all galleries in the database and import their torrent information from gallery detail pages (heavy operation):
+Scan galleries in the database and import their torrent information from gallery detail pages. By default this is a heavy operation that scans every eligible gallery, but you can now limit it to a specific posted-time window with the same `-offset` / `-start` / `-end` semantics as `backfill`:
 
 ```bash
 ./bin/ehdb-sync torrent-import
+./bin/ehdb-sync torrent-import -offset 2160
+./bin/ehdb-sync torrent-import -start 2026-01-01T00:00:00Z -end 2026-03-31T00:00:00Z
 ```
 
 **Parameters:**
 
 - `-config`: Config file path (optional, default: `config.yaml`)
 - `-host`: Specify the site - `e-hentai.org` or `exhentai.org` (optional, overrides config)
+- `-offset`: Import torrents for galleries posted within the most recent N hours (optional, mutually exclusive with `-start`/`-end`)
+- `-start`: Torrent import window start time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`)
+- `-end`: Torrent import window end time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`; defaults to current UTC time when omitted)
+- `-offset` and `-start`/`-end` are mutually exclusive
+- When no window arguments are provided, `torrent-import` scans all galleries with `root_gid IS NULL` and `removed = false`
 
-> **Warning**: This is a heavy operation that will scan all galleries in the database.
+> **Warning**: This is still a heavy operation inside the selected range because it opens each gallery's torrent detail page.
 
 #### Mark Replaced Galleries
 
