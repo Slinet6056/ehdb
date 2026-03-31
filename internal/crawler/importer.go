@@ -3,9 +3,11 @@ package crawler
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/slinet/ehdb/internal/database"
 	"github.com/slinet/ehdb/pkg/utils"
 	"go.uber.org/zap"
@@ -133,11 +135,20 @@ func (imp *Importer) loadGalleries(ctx context.Context) (map[int]int64, error) {
 // insertGallery inserts a new gallery
 func (imp *Importer) insertGallery(ctx context.Context, metadata database.GalleryMetadata, posted time.Time, filecount int, rating float64, torrentcount int, tags []string) error {
 	pool := database.GetPool()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
 	// Convert tags to JSONB array
 	tagsJSON, err := tagsToJSON(tags)
 	if err != nil {
 		return fmt.Errorf("convert tags to JSON: %w", err)
+	}
+
+	if err := imp.upsertTags(ctx, tx, tags); err != nil {
+		return err
 	}
 
 	query := `
@@ -169,7 +180,7 @@ func (imp *Importer) insertGallery(ctx context.Context, metadata database.Galler
 		)),
 	)
 
-	_, err = pool.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		metadata.Gid,
 		metadata.Token,
 		metadata.ArchiverKey,
@@ -186,18 +197,34 @@ func (imp *Importer) insertGallery(ctx context.Context, metadata database.Galler
 		torrentcount,
 		tagsJSON,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 // updateGallery updates an existing gallery
 func (imp *Importer) updateGallery(ctx context.Context, metadata database.GalleryMetadata, posted time.Time, filecount int, rating float64, torrentcount int, tags []string) error {
 	pool := database.GetPool()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
 
 	// Convert tags to JSONB array
 	tagsJSON, err := tagsToJSON(tags)
 	if err != nil {
 		return fmt.Errorf("convert tags to JSON: %w", err)
+	}
+
+	if err := imp.upsertTags(ctx, tx, tags); err != nil {
+		return err
 	}
 
 	query := `
@@ -240,7 +267,7 @@ func (imp *Importer) updateGallery(ctx context.Context, metadata database.Galler
 		)),
 	)
 
-	_, err = pool.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		metadata.Gid,
 		metadata.Token,
 		metadata.ArchiverKey,
@@ -257,8 +284,41 @@ func (imp *Importer) updateGallery(ctx context.Context, metadata database.Galler
 		torrentcount,
 		tagsJSON,
 	)
+	if err != nil {
+		return err
+	}
 
-	return err
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (imp *Importer) upsertTags(ctx context.Context, tx pgx.Tx, tags []string) error {
+	preparedTags := prepareTagsForUpsert(tags)
+	if len(preparedTags) == 0 {
+		return nil
+	}
+
+	query := `
+		INSERT INTO tag (name)
+		SELECT DISTINCT tag_name
+		FROM unnest($1::text[]) AS input(tag_name)
+		WHERE tag_name <> ''
+		ON CONFLICT (name) DO NOTHING
+	`
+
+	imp.logger.Debug("executing tag upsert query",
+		zap.String("sql", utils.FormatSQL(query, preparedTags)),
+		zap.Int("tag_count", len(preparedTags)),
+	)
+
+	if _, err := tx.Exec(ctx, query, preparedTags); err != nil {
+		return fmt.Errorf("upsert tags: %w", err)
+	}
+
+	return nil
 }
 
 // refreshStats refreshes statistics materialized views
@@ -293,4 +353,27 @@ func tagsToJSON(tags []string) (string, error) {
 	result += "]"
 
 	return result, nil
+}
+
+func prepareTagsForUpsert(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	uniqueTags := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag == "" {
+			continue
+		}
+		uniqueTags[tag] = struct{}{}
+	}
+
+	preparedTags := make([]string, 0, len(uniqueTags))
+	for tag := range uniqueTags {
+		preparedTags = append(preparedTags, tag)
+	}
+
+	sort.Strings(preparedTags)
+
+	return preparedTags
 }
