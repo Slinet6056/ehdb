@@ -15,6 +15,10 @@ import (
 	"go.uber.org/zap"
 )
 
+var nowFunc = func() time.Time {
+	return time.Now().UTC()
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
@@ -66,7 +70,7 @@ func printUsage() {
 	fmt.Println("  sync              Sync latest galleries from E-Hentai")
 	fmt.Println("                    Options: -config <path> -host <host> -offset <hours>")
 	fmt.Println("  backfill          Backfill missing galleries from the list replay window")
-	fmt.Println("                    Options: -config <path> -host <host> (-offset <hours> | -start <time> -end <time>)")
+	fmt.Println("                    Options: -config <path> -host <host> (-offset <hours> | -start <time> [-end <time>])")
 	fmt.Println("  resync            Resync galleries from recent hours")
 	fmt.Println("                    Options: -config <path> -hours <N>")
 	fmt.Println("  fetch             Manually fetch specific galleries")
@@ -184,15 +188,15 @@ func resolveBackfillWindow(startRaw, endRaw string, offsetHours int) (time.Time,
 	}
 
 	if !hasOffset && !hasStart && !hasEnd {
-		return time.Time{}, time.Time{}, fmt.Errorf("either -offset or both -start and -end must be provided")
+		return time.Time{}, time.Time{}, fmt.Errorf("either -offset or -start must be provided")
 	}
 
-	if hasStart != hasEnd {
-		return time.Time{}, time.Time{}, fmt.Errorf("-start and -end must be provided together")
+	if hasEnd && !hasStart {
+		return time.Time{}, time.Time{}, fmt.Errorf("-end cannot be used without -start")
 	}
 
 	if hasOffset {
-		endTime := time.Now().UTC()
+		endTime := nowFunc()
 		startTime := endTime.Add(-time.Duration(offsetHours) * time.Hour)
 		return startTime, endTime, nil
 	}
@@ -202,9 +206,12 @@ func resolveBackfillWindow(startRaw, endRaw string, offsetHours int) (time.Time,
 		return time.Time{}, time.Time{}, fmt.Errorf("parse start time: %w", err)
 	}
 
-	endTime, err := parseBackfillTime(endRaw, false)
-	if err != nil {
-		return time.Time{}, time.Time{}, fmt.Errorf("parse end time: %w", err)
+	endTime := nowFunc()
+	if hasEnd {
+		endTime, err = parseBackfillTime(endRaw, false)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("parse end time: %w", err)
+		}
 	}
 
 	if !startTime.Before(endTime) {

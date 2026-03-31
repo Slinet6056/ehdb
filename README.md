@@ -141,6 +141,7 @@ Replay the gallery list within a time window, compare discovered galleries again
 
 ```bash
 ./bin/ehdb-sync backfill -start 2026-01-01T00:00:00Z -end 2026-03-31T00:00:00Z
+./bin/ehdb-sync backfill -start 2026-01-01T00:00:00Z
 ```
 
 **Parameters:**
@@ -149,9 +150,9 @@ Replay the gallery list within a time window, compare discovered galleries again
 - `-host`: Specify the site - `e-hentai.org` or `exhentai.org` (optional, overrides config)
 - `-offset`: Backfill the most recent N hours (optional, mutually exclusive with `-start`/`-end`)
 - `-start`: Backfill window start time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`)
-- `-end`: Backfill window end time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`)
+- `-end`: Backfill window end time (optional, accepts RFC3339, `2006-01-02 15:04`, or `2006-01-02`; defaults to current UTC time when omitted)
 - `-offset` and `-start`/`-end` are mutually exclusive
-- You must provide either `-offset`, or both `-start` and `-end`
+- You must provide either `-offset`, or `-start` (with optional `-end`)
 
 #### Resync Recent Galleries
 
