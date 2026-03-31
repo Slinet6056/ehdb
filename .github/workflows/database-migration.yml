@@ -46,11 +46,11 @@ jobs:
           set -euo pipefail
           # Download upstream SQLite database dump from URenko/e-hentai-db
           echo "Downloading upstream SQLite database dump..."
-          wget -O e-hentai.db.zst "https://github.com/URenko/e-hentai-db/releases/download/v0.4.0/e-hentai.db.zst"
+          wget -O e-hentai.db.zstd "https://github.com/URenko/e-hentai-db/releases/download/nightly/e-hentai.db.zstd"
 
           # Extract
           echo "Extracting database file..."
-          zstd -d e-hentai.db.zst -o e-hentai.db
+          zstd -d e-hentai.db.zstd -o e-hentai.db
 
           # Verify extracted file exists and is not empty
           if [ ! -s e-hentai.db ]; then
@@ -273,5 +273,5 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          rm -f e-hentai.db e-hentai.db.zst pgloader.conf
+          rm -f e-hentai.db e-hentai.db.zstd pgloader.conf
           echo "Cleanup completed"
