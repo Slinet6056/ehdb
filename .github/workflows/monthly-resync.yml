@@ -3,7 +3,7 @@ name: Monthly Deep Resync
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 16 1 * *"
+    - cron: "42 16 1 * *"
 
 permissions:
   contents: read

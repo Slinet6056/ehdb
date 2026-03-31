@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       start_time:
-        description: "Backfill window start time (RFC3339). Defaults to end_time minus 90 days."
+        description: "Backfill window start time (RFC3339)."
         required: false
         type: string
       end_time:
-        description: "Backfill window end time (RFC3339). Defaults to current UTC time."
+        description: "Backfill window end time (RFC3339)."
         required: false
         type: string
   schedule:
-    - cron: "0 16 * * 0"
+    - cron: "42 0 * * 0"
 
 permissions:
   contents: read
@@ -90,16 +90,19 @@ jobs:
           end_time = os.getenv("INPUT_END_TIME", "").strip()
           start_time = os.getenv("INPUT_START_TIME", "").strip()
 
-          if bool(start_time) != bool(end_time):
-              raise SystemExit("start_time and end_time must be provided together for manual backfill")
+          if end_time and not start_time:
+              raise SystemExit("end_time cannot be provided without start_time")
 
           if not start_time:
               print("BACKFILL_MODE=offset")
-              print("BACKFILL_OFFSET=2160")
+              print("BACKFILL_OFFSET=336")
           else:
               print("BACKFILL_MODE=window")
-              end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")).astimezone(timezone.utc)
               start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00")).astimezone(timezone.utc)
+              if end_time:
+                  end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00")).astimezone(timezone.utc)
+              else:
+                  end_dt = datetime.now(timezone.utc)
               print(f"BACKFILL_START={start_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}")
               print(f"BACKFILL_END={end_dt.strftime('%Y-%m-%dT%H:%M:%SZ')}")
           PY
