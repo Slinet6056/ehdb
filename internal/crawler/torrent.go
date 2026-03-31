@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -201,9 +202,10 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 	c.logger.Info("starting torrent processing", zap.Int("galleries", len(gidMap)))
 	processed := 0
 	newTorrents := 0
-	total := len(gidMap)
+	orderedGIDs := orderedGalleryIDsByMaxGTID(gidMap)
+	total := len(orderedGIDs)
 
-	for gid := range gidMap {
+	for _, gid := range orderedGIDs {
 		token := gidMap[gid][0].Token
 
 		count, err := Retry(RetryConfig{
@@ -214,14 +216,7 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 			return c.processTorrentsForGallery(ctx, gid, token)
 		})
 		if err != nil {
-			if errors.Is(err, ErrAuthRequired) {
-				return fmt.Errorf("auth failed while processing gallery %d torrents: %w", gid, err)
-			}
-			if isTemporaryBanError(err) {
-				return fmt.Errorf("temporary ban detected while processing gallery %d torrents: %w", gid, err)
-			}
-			c.logger.Error("failed to process gallery torrents", zap.Int("gid", gid), zap.Error(err))
-			continue
+			return c.torrentProcessingFailure(gid, err)
 		}
 
 		processed++
@@ -245,6 +240,52 @@ func (c *TorrentCrawler) Sync(ctx context.Context) error {
 		zap.Int("new_torrents", newTorrents),
 	)
 	return nil
+}
+
+func (c *TorrentCrawler) torrentProcessingFailure(gid int, err error) error {
+	if errors.Is(err, ErrAuthRequired) {
+		return fmt.Errorf("auth failed while processing gallery %d torrents: %w", gid, err)
+	}
+
+	if isTemporaryBanError(err) {
+		return fmt.Errorf("temporary ban detected while processing gallery %d torrents: %w", gid, err)
+	}
+
+	return fmt.Errorf("failed to process gallery %d torrents: %w", gid, err)
+}
+
+func orderedGalleryIDsByMaxGTID(gidMap map[int][]TorrentListItem) []int {
+	type galleryOrder struct {
+		gid     int
+		maxGTID int
+	}
+
+	ordered := make([]galleryOrder, 0, len(gidMap))
+	for gid, items := range gidMap {
+		maxGTID := 0
+		for _, item := range items {
+			if item.Gtid > maxGTID {
+				maxGTID = item.Gtid
+			}
+		}
+
+		ordered = append(ordered, galleryOrder{gid: gid, maxGTID: maxGTID})
+	}
+
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].maxGTID == ordered[j].maxGTID {
+			return ordered[i].gid < ordered[j].gid
+		}
+
+		return ordered[i].maxGTID < ordered[j].maxGTID
+	})
+
+	gids := make([]int, 0, len(ordered))
+	for _, entry := range ordered {
+		gids = append(gids, entry.gid)
+	}
+
+	return gids
 }
 
 // fetchTorrentListPage fetches a single page from torrents.php
