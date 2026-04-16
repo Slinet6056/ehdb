@@ -96,6 +96,42 @@ pg_restore -U postgres -d ehentai_db --no-owner --no-privileges -v ehentai_db.du
 
 If you have an existing SQLite database, see the [Migration Guide](migration/README.md) for detailed migration instructions using pgloader.
 
+## Configuration
+
+Key crawler options in `config.yaml`:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `crawler.host` | `e-hentai.org` | Target site: `e-hentai.org` or `exhentai.org` |
+| `crawler.cookies` | `""` | Cookie string for authentication |
+| `crawler.proxy` | `""` | Proxy URL: `http://host:port` or `socks5://host:port` |
+| `crawler.retry_times` | `3` | Number of retry attempts on failure |
+| `crawler.wait_for_ip_unban` | `false` | Wait out temporary IP bans automatically |
+| `crawler.page_delay_seconds` | `1` | Delay between page fetches (seconds) |
+| `crawler.api_delay_seconds` | `1` | Delay between API calls (seconds) |
+| `crawler.flaresolverr_enabled` | `false` | Enable FlareSolverr for Cloudflare bypass |
+| `crawler.flaresolverr_url` | `http://localhost:8191` | FlareSolverr service URL |
+
+### FlareSolverr
+
+If page fetches are blocked by Cloudflare challenges, enable FlareSolverr integration:
+
+1. Start a FlareSolverr instance:
+
+   ```bash
+   docker run -d -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest
+   ```
+
+2. Enable it in `config.yaml`:
+
+   ```yaml
+   crawler:
+     flaresolverr_enabled: true
+     flaresolverr_url: "http://localhost:8191"
+   ```
+
+When enabled, page GET requests are first attempted normally. If the response is detected as a Cloudflare challenge, the request is automatically retried through FlareSolverr. Cookies obtained by FlareSolverr are synced back and persisted for subsequent requests.
+
 ## Usage
 
 ### API Server

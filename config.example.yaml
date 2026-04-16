@@ -38,6 +38,11 @@ crawler:
   # Delay between API calls (in seconds)
   # Based on practice: 1s interval triggers rate limit after ~30 minutes, 2s interval after ~70 minutes
   api_delay_seconds: 1
+  # FlareSolverr integration for Cloudflare bypass
+  # Set flaresolverr_enabled to true and point flaresolverr_url to your FlareSolverr instance
+  # See: https://github.com/FlareSolverr/FlareSolverr
+  flaresolverr_enabled: false
+  flaresolverr_url: "http://localhost:8191"
 
 scheduler:
   # Gallery sync

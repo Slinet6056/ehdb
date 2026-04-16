@@ -46,17 +46,19 @@ type APILimitsConfig struct {
 
 // CrawlerConfig holds crawler settings
 type CrawlerConfig struct {
-	Host             string `mapstructure:"host"`
-	Cookies          string `mapstructure:"cookies"`
-	ConfigDir        string
-	Proxy            string `mapstructure:"proxy"`
-	RetryTimes       int    `mapstructure:"retry_times"`
-	WaitForIPUnban   bool   `mapstructure:"wait_for_ip_unban"`
-	PageDelaySeconds int    `mapstructure:"page_delay_seconds"` // Delay between page fetches
-	APIDelaySeconds  int    `mapstructure:"api_delay_seconds"`  // Delay between API calls
-	Offset           int    // Temporary parameter, not from config file
-	BackfillStart    int64  // Temporary parameter, not from config file
-	BackfillEnd      int64  // Temporary parameter, not from config file
+	Host                string `mapstructure:"host"`
+	Cookies             string `mapstructure:"cookies"`
+	ConfigDir           string
+	Proxy               string `mapstructure:"proxy"`
+	RetryTimes          int    `mapstructure:"retry_times"`
+	WaitForIPUnban      bool   `mapstructure:"wait_for_ip_unban"`
+	PageDelaySeconds    int    `mapstructure:"page_delay_seconds"`   // Delay between page fetches
+	APIDelaySeconds     int    `mapstructure:"api_delay_seconds"`    // Delay between API calls
+	FlareSolverrEnabled bool   `mapstructure:"flaresolverr_enabled"` // Enable FlareSolverr for Cloudflare bypass
+	FlareSolverrURL     string `mapstructure:"flaresolverr_url"`     // FlareSolverr service URL
+	Offset              int    // Temporary parameter, not from config file
+	BackfillStart       int64  // Temporary parameter, not from config file
+	BackfillEnd         int64  // Temporary parameter, not from config file
 }
 
 // SchedulerConfig holds scheduler settings
@@ -95,6 +97,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("crawler.wait_for_ip_unban", false)
 	v.SetDefault("crawler.page_delay_seconds", 1)
 	v.SetDefault("crawler.api_delay_seconds", 1)
+	v.SetDefault("crawler.flaresolverr_enabled", false)
+	v.SetDefault("crawler.flaresolverr_url", "http://localhost:8191")
 	v.SetDefault("scheduler.gallery_sync_cron", "0 * * * *")
 	v.SetDefault("scheduler.gallery_sync_enabled", true)
 	v.SetDefault("scheduler.gallery_sync_offset", 0)

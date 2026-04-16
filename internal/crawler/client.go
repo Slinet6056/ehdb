@@ -24,6 +24,9 @@ type Client struct {
 	host        string
 	cookiesPath string
 
+	flareSolverrEnabled bool
+	flareSolverrURL     string
+
 	mu      sync.RWMutex
 	cookies map[string]string
 }
@@ -38,9 +41,11 @@ func NewClient(cfg *config.CrawlerConfig) (*Client, error) {
 	}
 
 	client := &Client{
-		host:        cfg.Host,
-		cookiesPath: cookiesPath,
-		cookies:     mergeCookies(parseCookieHeader(cfg.Cookies), fileCookies),
+		host:                cfg.Host,
+		cookiesPath:         cookiesPath,
+		cookies:             mergeCookies(parseCookieHeader(cfg.Cookies), fileCookies),
+		flareSolverrEnabled: cfg.FlareSolverrEnabled,
+		flareSolverrURL:     cfg.FlareSolverrURL,
 	}
 
 	transport := &http.Transport{
@@ -292,12 +297,19 @@ func (c *Client) Get(url string) ([]byte, error) {
 	}
 
 	// Set headers
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*")
-	req.Header.Set("Accept-Language", "en-US;q=0.9,en;q=0.8")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 	req.Header.Set("Referer", fmt.Sprintf("https://%s", c.host))
 	req.Header.Set("DNT", "1")
 	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("sec-ch-ua", `"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-platform", `"Windows"`)
+	req.Header.Set("sec-fetch-dest", "document")
+	req.Header.Set("sec-fetch-mode", "navigate")
+	req.Header.Set("sec-fetch-site", "same-origin")
+	req.Header.Set("sec-fetch-user", "?1")
 
 	if cookieHeader := c.cookieHeader(); cookieHeader != "" {
 		req.Header.Set("Cookie", cookieHeader)
@@ -318,6 +330,13 @@ func (c *Client) Get(url string) ([]byte, error) {
 		return nil, err
 	}
 
+	// If FlareSolverr is configured and the response looks like a Cloudflare challenge, retry through it
+	if c.flareSolverrEnabled && c.flareSolverrURL != "" {
+		if _, isCF := suspectedAbnormalWebPageReason(body); isCF {
+			return c.flareSolverrGet(url, c.flareSolverrURL)
+		}
+	}
+
 	if err := c.validateResponse(resp, body); err != nil {
 		return nil, err
 	}
@@ -336,7 +355,7 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 	req.Header.Set("Accept", "application/json;q=0.9,*/*")
 	req.Header.Set("Accept-Language", "en-US;q=0.9,en;q=0.8")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
 	req.Header.Set("DNT", "1")
 	req.ContentLength = int64(len(jsonData))
 
