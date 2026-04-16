@@ -65,6 +65,8 @@ jobs:
             wait_for_ip_unban: true
             page_delay_seconds: 1
             api_delay_seconds: 3
+            flaresolverr_enabled: true
+            flaresolverr_url: "http://localhost:8191"
 
           log_level: info
           EOF
