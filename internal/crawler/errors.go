@@ -111,7 +111,8 @@ func abnormalGalleryListPageReason(body []byte) (string, bool) {
 		"just a moment",
 		"checking your browser before accessing",
 		"captcha",
-		"cloudflare",
+		"cf-browser-verification",
+		"cf_chl_opt",
 		"ddos-guard",
 		"access denied",
 	}
@@ -154,7 +155,8 @@ func suspectedAbnormalWebPageReason(body []byte) (string, bool) {
 		"just a moment",
 		"checking your browser before accessing",
 		"captcha",
-		"cloudflare",
+		"cf-browser-verification",
+		"cf_chl_opt",
 		"ddos-guard",
 		"access denied",
 	}

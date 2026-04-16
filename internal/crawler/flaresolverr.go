@@ -10,9 +10,10 @@ import (
 )
 
 type flareSolverrRequest struct {
-	CMD        string `json:"cmd"`
-	URL        string `json:"url"`
-	MaxTimeout int    `json:"maxTimeout"`
+	CMD        string               `json:"cmd"`
+	URL        string               `json:"url"`
+	MaxTimeout int                  `json:"maxTimeout"`
+	Cookies    []flareSolverrCookie `json:"cookies,omitempty"`
 }
 
 type flareSolverrCookie struct {
@@ -37,10 +38,18 @@ type flareSolverrResponse struct {
 // flareSolverrGet sends a GET request through FlareSolverr and returns the response body.
 // It also syncs any cookies returned by FlareSolverr back into the client.
 func (c *Client) flareSolverrGet(targetURL, serviceURL string) ([]byte, error) {
+	c.mu.RLock()
+	var cookies []flareSolverrCookie
+	for name, value := range c.cookies {
+		cookies = append(cookies, flareSolverrCookie{Name: name, Value: value})
+	}
+	c.mu.RUnlock()
+
 	payload, err := json.Marshal(flareSolverrRequest{
 		CMD:        "request.get",
 		URL:        targetURL,
 		MaxTimeout: 60000,
+		Cookies:    cookies,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal flaresolverr request: %w", err)
