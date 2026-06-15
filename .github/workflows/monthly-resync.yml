@@ -23,7 +23,7 @@ jobs:
 
       - name: Install 1Password CLI
         if: vars.OP_COOKIES_SECRET_REFERENCE != '' || (vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != '')
-        uses: 1password/install-cli-action@v3
+        uses: 1password/install-cli-action@v4
 
       - name: Load crawler cookies from 1Password
         if: vars.OP_COOKIES_SECRET_REFERENCE != ''
