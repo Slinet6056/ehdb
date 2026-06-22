@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install 1Password CLI
         if: vars.OP_COOKIES_SECRET_REFERENCE != '' || (vars.OP_COOKIES_VAULT != '' && vars.OP_COOKIES_ITEM != '')
