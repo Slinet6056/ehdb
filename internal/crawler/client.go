@@ -151,6 +151,31 @@ func (c *Client) cookieValue(name string) (string, bool) {
 	return value, ok
 }
 
+func (c *Client) cookiesWithResponse(resp *http.Response) map[string]string {
+	c.mu.RLock()
+	cookies := normalizeCookies(c.cookies)
+	c.mu.RUnlock()
+
+	if resp == nil {
+		return cookies
+	}
+
+	for _, cookie := range resp.Cookies() {
+		if cookie.Name == "" {
+			continue
+		}
+
+		if cookie.Value == "" || cookie.MaxAge < 0 || (!cookie.Expires.IsZero() && cookie.Expires.Before(time.Now())) {
+			delete(cookies, cookie.Name)
+			continue
+		}
+
+		cookies[cookie.Name] = cookie.Value
+	}
+
+	return cookies
+}
+
 func (c *Client) updateCookies(resp *http.Response) error {
 	if resp == nil {
 		return c.persistCookiesSnapshotIfMissing()
@@ -237,7 +262,7 @@ func (c *Client) persistCookiesSnapshotIfMissing() error {
 	return nil
 }
 
-func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte) (string, bool) {
+func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte, cookies map[string]string) (string, bool) {
 	if !strings.EqualFold(c.host, "exhentai.org") || resp == nil {
 		return "", false
 	}
@@ -247,7 +272,7 @@ func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte) (st
 		return "", false
 	}
 
-	igneous, ok := c.cookieValue("igneous")
+	igneous, ok := cookies["igneous"]
 	if !ok || !strings.EqualFold(igneous, "mystery") {
 		return "", false
 	}
@@ -255,11 +280,29 @@ func (c *Client) detectExHentaiAuthFailure(resp *http.Response, body []byte) (st
 	if strings.Contains(contentType, "text/html") && len(bytes.TrimSpace(body)) == 0 {
 		return "received blank HTML with igneous=mystery", true
 	}
+	if strings.Contains(contentType, "text/html") && isEmptyHTMLShell(body) {
+		return "received empty HTML shell with igneous=mystery", true
+	}
 
 	return "", false
 }
 
+func isEmptyHTMLShell(body []byte) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(string(body)))
+	trimmed = strings.ReplaceAll(trimmed, "\n", "")
+	trimmed = strings.ReplaceAll(trimmed, "\r", "")
+	trimmed = strings.ReplaceAll(trimmed, "\t", "")
+	trimmed = strings.ReplaceAll(trimmed, " ", "")
+
+	return trimmed == "<html><head></head><body></body></html>" ||
+		trimmed == "<html><head/><body/></html>"
+}
+
 func (c *Client) validateResponse(resp *http.Response, body []byte) error {
+	return c.validateResponseWithCookies(resp, body, c.cookiesWithResponse(nil))
+}
+
+func (c *Client) validateResponseWithCookies(resp *http.Response, body []byte, cookies map[string]string) error {
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("auth failed with status code %d: %w", resp.StatusCode, ErrAuthRequired)
 	}
@@ -268,7 +311,7 @@ func (c *Client) validateResponse(resp *http.Response, body []byte) error {
 		return fmt.Errorf("auth failed, detected marker %q: %w", marker, ErrAuthRequired)
 	}
 
-	if reason, ok := c.detectExHentaiAuthFailure(resp, body); ok {
+	if reason, ok := c.detectExHentaiAuthFailure(resp, body, cookies); ok {
 		return fmt.Errorf("auth failed, detected ExHentai session issue (%s): %w", reason, ErrAuthRequired)
 	}
 
@@ -326,18 +369,21 @@ func (c *Client) Get(url string) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	if err := c.updateCookies(resp); err != nil {
-		return nil, err
-	}
-
 	// If FlareSolverr is configured and the response looks like a Cloudflare challenge, retry through it
 	if c.flareSolverrEnabled && c.flareSolverrURL != "" {
 		if _, isCF := suspectedAbnormalWebPageReason(body); isCF {
+			if err := c.updateCookies(resp); err != nil {
+				return nil, err
+			}
 			return c.flareSolverrGet(url, c.flareSolverrURL)
 		}
 	}
 
-	if err := c.validateResponse(resp, body); err != nil {
+	if err := c.validateResponseWithCookies(resp, body, c.cookiesWithResponse(resp)); err != nil {
+		return nil, err
+	}
+
+	if err := c.updateCookies(resp); err != nil {
 		return nil, err
 	}
 
@@ -374,11 +420,11 @@ func (c *Client) Post(url string, jsonData []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	if err := c.updateCookies(resp); err != nil {
+	if err := c.validateResponseWithCookies(resp, body, c.cookiesWithResponse(resp)); err != nil {
 		return nil, err
 	}
 
-	if err := c.validateResponse(resp, body); err != nil {
+	if err := c.updateCookies(resp); err != nil {
 		return nil, err
 	}
 

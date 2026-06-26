@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/slinet/ehdb/internal/config"
@@ -275,6 +277,58 @@ func TestClientUpdateCookiesDoesNotRewriteExistingCookiesFileWithoutChanges(t *t
 	}
 }
 
+func TestClientGetRejectsEmptyExHentaiShellAndDoesNotPersistMysteryCookie(t *testing.T) {
+	t.Helper()
+
+	setCookiesFilePathForTest(t, filepath.Join(t.TempDir(), "cookies.json"))
+	if err := persistCookiesToFile(cookiesFilePath, map[string]string{
+		"igneous":       "fresh",
+		"ipb_member_id": "1",
+		"ipb_pass_hash": "hash",
+	}); err != nil {
+		t.Fatalf("persist initial cookies: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+		http.SetCookie(w, &http.Cookie{Name: "igneous", Value: "mystery", Path: "/", Domain: ".exhentai.org"})
+		_, _ = w.Write([]byte("<html><head></head><body></body></html>"))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		httpClient: server.Client(),
+		host:       "exhentai.org",
+		cookies:    parseCookieHeader("igneous=fresh; ipb_member_id=1; ipb_pass_hash=hash"),
+	}
+
+	_, err := client.Get(server.URL)
+	if err == nil {
+		t.Fatal("expected auth error, got nil")
+	}
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("expected ErrAuthRequired, got %v", err)
+	}
+
+	igneous, ok := client.cookieValue("igneous")
+	if !ok || igneous != "fresh" {
+		t.Fatalf("expected in-memory igneous to remain fresh, got %q", igneous)
+	}
+
+	data, err := os.ReadFile(cookiesFilePath)
+	if err != nil {
+		t.Fatalf("read cookies file: %v", err)
+	}
+
+	var cookies map[string]string
+	if err := json.Unmarshal(data, &cookies); err != nil {
+		t.Fatalf("unmarshal cookies file: %v", err)
+	}
+	if cookies["igneous"] != "fresh" {
+		t.Fatalf("expected persisted igneous to remain fresh, got %q", cookies["igneous"])
+	}
+}
+
 func TestClientValidateResponseRejectsExistingMysteryIgneousOnBlankHTML(t *testing.T) {
 	t.Helper()
 
@@ -303,6 +357,40 @@ func TestClientValidateResponseRejectsExistingMysteryIgneousOnBlankHTML(t *testi
 
 	if !errors.Is(err, ErrAuthRequired) {
 		t.Fatalf("expected ErrAuthRequired, got %v", err)
+	}
+}
+
+func TestClientValidateResponseRejectsExistingMysteryIgneousOnEmptyHTMLShell(t *testing.T) {
+	t.Helper()
+
+	requestURL, err := url.Parse("https://exhentai.org/")
+	if err != nil {
+		t.Fatalf("parse request url: %v", err)
+	}
+
+	client := &Client{
+		host:    "exhentai.org",
+		cookies: parseCookieHeader("ipb_member_id=1; ipb_pass_hash=hash; igneous=mystery"),
+	}
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/html; charset=UTF-8"},
+		},
+		Request: &http.Request{URL: requestURL},
+	}
+
+	err = client.validateResponse(resp, []byte("<html><head></head><body></body></html>"))
+	if err == nil {
+		t.Fatal("expected auth error, got nil")
+	}
+
+	if !errors.Is(err, ErrAuthRequired) {
+		t.Fatalf("expected ErrAuthRequired, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "empty HTML shell") {
+		t.Fatalf("expected empty shell reason, got %v", err)
 	}
 }
 
