@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -86,6 +87,23 @@ func (c *Client) flareSolverrGet(targetURL, serviceURL string) ([]byte, error) {
 		return nil, fmt.Errorf("flaresolverr upstream status: %d", fsResp.Solution.Status)
 	}
 
+	contentType := fsResp.Solution.Headers["Content-Type"]
+	if contentType == "" {
+		contentType = fsResp.Solution.Headers["content-type"]
+	}
+	if c.flareSolverrHasExHentaiMysteryShell(contentType, fsResp.Solution.Response, fsResp.Solution.Cookies) {
+		return nil, fmt.Errorf("auth failed, detected ExHentai session issue (received empty HTML shell with igneous=mystery from flaresolverr): %w", ErrAuthRequired)
+	}
+	validationResp := &http.Response{
+		StatusCode: fsResp.Solution.Status,
+		Header: http.Header{
+			"Content-Type": []string{contentType},
+		},
+	}
+	if err := c.validateResponse(validationResp, []byte(fsResp.Solution.Response)); err != nil {
+		return nil, err
+	}
+
 	// Sync cookies returned by FlareSolverr back into the client
 	if len(fsResp.Solution.Cookies) > 0 {
 		c.mu.Lock()
@@ -110,4 +128,24 @@ func (c *Client) flareSolverrGet(targetURL, serviceURL string) ([]byte, error) {
 	}
 
 	return []byte(fsResp.Solution.Response), nil
+}
+
+func (c *Client) flareSolverrHasExHentaiMysteryShell(contentType, response string, cookies []flareSolverrCookie) bool {
+	if !strings.EqualFold(c.host, "exhentai.org") {
+		return false
+	}
+	if contentType != "" && !strings.Contains(strings.ToLower(contentType), "text/html") {
+		return false
+	}
+	if !isEmptyHTMLShell([]byte(response)) {
+		return false
+	}
+
+	for _, cookie := range cookies {
+		if strings.EqualFold(cookie.Name, "igneous") && strings.EqualFold(cookie.Value, "mystery") {
+			return true
+		}
+	}
+
+	return false
 }
