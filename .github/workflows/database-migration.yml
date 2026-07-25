@@ -257,6 +257,11 @@ jobs:
 
           cat migration_stats.txt
 
+      - name: Delete existing Nightly Release
+        run: gh release delete nightly --yes --repo "$GITHUB_REPOSITORY" || true
+        env:
+          GH_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v3
         with:

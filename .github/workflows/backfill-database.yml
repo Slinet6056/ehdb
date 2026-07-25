@@ -242,6 +242,11 @@ jobs:
 
           cat backfill_stats.txt
 
+      - name: Delete existing Live Release
+        run: gh release delete live --yes --repo "$GITHUB_REPOSITORY" || true
+        env:
+          GH_TOKEN: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+
       - name: Update Live Release
         uses: softprops/action-gh-release@v3
         with:
