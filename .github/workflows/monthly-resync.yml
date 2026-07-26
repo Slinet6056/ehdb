@@ -62,6 +62,7 @@ jobs:
             cookies: "${{ secrets.EHENTAI_COOKIES }}"
             proxy: ""
             retry_times: 3
+            transient_retry_times: 6
             wait_for_ip_unban: true
             page_delay_seconds: 1
             api_delay_seconds: 3

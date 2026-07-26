@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -315,11 +316,43 @@ func (c *Client) validateResponseWithCookies(resp *http.Response, body []byte, c
 		return fmt.Errorf("auth failed, detected ExHentai session issue (%s): %w", reason, ErrAuthRequired)
 	}
 
+	if isTransientStatusCode(resp.StatusCode) {
+		return fmt.Errorf("%w", &TransientError{
+			StatusCode: resp.StatusCode,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")),
+		})
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	return nil
+}
+
+// parseRetryAfter parses the HTTP Retry-After header, which may be either a
+// number of seconds or an HTTP-date. It returns 0 when the header is absent,
+// malformed, or points to a time in the past.
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+
+	if t, err := http.ParseTime(value); err == nil {
+		if d := time.Until(t); d > 0 {
+			return d
+		}
+	}
+
+	return 0
 }
 
 func (c *Client) apiURL() string {

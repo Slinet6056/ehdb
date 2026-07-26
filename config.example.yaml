@@ -29,8 +29,11 @@ crawler:
   cookies: ""
   # Proxy URL: http://proxy:port or socks5://proxy:port
   proxy: ""
-  # Number of retry attempts
+  # Number of retry attempts for ordinary failures (parse errors, abnormal pages)
   retry_times: 3
+  # Number of retry attempts for transient upstream errors (HTTP 5xx / 429).
+  # These use exponential backoff with jitter and honor the Retry-After header.
+  transient_retry_times: 6
   # Whether to wait when IP is temporarily banned (will parse ban duration and wait)
   wait_for_ip_unban: false
   # Delay between page fetches (in seconds)

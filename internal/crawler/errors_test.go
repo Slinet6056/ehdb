@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestIsAuthFailureBody(t *testing.T) {
@@ -121,6 +122,116 @@ func TestAbnormalGalleryListPageReason(t *testing.T) {
 				t.Fatalf("unexpected abnormal result: got %v want %v", ok, tt.wantOk)
 			}
 		})
+	}
+}
+
+// withFastBackoff shrinks the transient backoff durations for the duration of a
+// test so retry loops don't sleep for real seconds.
+func withFastBackoff(t *testing.T) {
+	t.Helper()
+	base, max := transientBaseBackoff, transientMaxBackoff
+	transientBaseBackoff = time.Millisecond
+	transientMaxBackoff = 5 * time.Millisecond
+	t.Cleanup(func() {
+		transientBaseBackoff = base
+		transientMaxBackoff = max
+	})
+}
+
+func TestRetryUsesTransientBudget(t *testing.T) {
+	withFastBackoff(t)
+	attempts := 0
+
+	_, err := Retry(RetryConfig{MaxRetries: 2, TransientRetryTimes: 4}, func() (int, error) {
+		attempts++
+		return 0, fmt.Errorf("fetch page: %w", &TransientError{StatusCode: 503})
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// Should attempt exactly TransientRetryTimes times, not MaxRetries.
+	if attempts != 4 {
+		t.Fatalf("expected 4 attempts, got %d", attempts)
+	}
+
+	var te *TransientError
+	if !errors.As(err, &te) {
+		t.Fatalf("expected wrapped TransientError, got %v", err)
+	}
+}
+
+func TestRetryTransientThenSuccess(t *testing.T) {
+	withFastBackoff(t)
+	attempts := 0
+
+	got, err := Retry(RetryConfig{MaxRetries: 1, TransientRetryTimes: 3}, func() (int, error) {
+		attempts++
+		if attempts < 2 {
+			return 0, fmt.Errorf("fetch page: %w", &TransientError{StatusCode: 502})
+		}
+		return 42, nil
+	})
+
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("expected 42, got %d", got)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts, got %d", attempts)
+	}
+}
+
+func TestRetryNormalErrorKeepsSmallBudget(t *testing.T) {
+	attempts := 0
+
+	err := RetryVoid(RetryConfig{MaxRetries: 1, TransientRetryTimes: 6}, func() error {
+		attempts++
+		return fmt.Errorf("parse failure")
+	})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	// Ordinary errors must not borrow the larger transient budget: a bug that
+	// routed them through it would yield 6 attempts instead of 1.
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestIsTransientStatusCode(t *testing.T) {
+	transient := []int{429, 500, 502, 503, 504}
+	for _, code := range transient {
+		if !isTransientStatusCode(code) {
+			t.Fatalf("expected %d to be transient", code)
+		}
+	}
+
+	notTransient := []int{200, 301, 400, 401, 403, 404}
+	for _, code := range notTransient {
+		if isTransientStatusCode(code) {
+			t.Fatalf("expected %d to not be transient", code)
+		}
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	if d := parseRetryAfter("30"); d != 30*time.Second {
+		t.Fatalf("expected 30s, got %v", d)
+	}
+	if d := parseRetryAfter(""); d != 0 {
+		t.Fatalf("expected 0 for empty, got %v", d)
+	}
+	if d := parseRetryAfter("0"); d != 0 {
+		t.Fatalf("expected 0 for zero seconds, got %v", d)
+	}
+	if d := parseRetryAfter("not-a-number"); d != 0 {
+		t.Fatalf("expected 0 for garbage, got %v", d)
 	}
 }
 

@@ -105,7 +105,8 @@ Key crawler options in `config.yaml`:
 | `crawler.host` | `e-hentai.org` | Target site: `e-hentai.org` or `exhentai.org` |
 | `crawler.cookies` | `""` | Cookie string for authentication |
 | `crawler.proxy` | `""` | Proxy URL: `http://host:port` or `socks5://host:port` |
-| `crawler.retry_times` | `3` | Number of retry attempts on failure |
+| `crawler.retry_times` | `3` | Number of retry attempts for ordinary failures |
+| `crawler.transient_retry_times` | `6` | Retry attempts for transient upstream errors (HTTP 5xx / 429), using exponential backoff with jitter and honoring `Retry-After` |
 | `crawler.wait_for_ip_unban` | `false` | Wait out temporary IP bans automatically |
 | `crawler.page_delay_seconds` | `1` | Delay between page fetches (seconds) |
 | `crawler.api_delay_seconds` | `1` | Delay between API calls (seconds) |

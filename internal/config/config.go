@@ -51,6 +51,7 @@ type CrawlerConfig struct {
 	ConfigDir           string
 	Proxy               string `mapstructure:"proxy"`
 	RetryTimes          int    `mapstructure:"retry_times"`
+	TransientRetryTimes int    `mapstructure:"transient_retry_times"`
 	WaitForIPUnban      bool   `mapstructure:"wait_for_ip_unban"`
 	PageDelaySeconds    int    `mapstructure:"page_delay_seconds"`   // Delay between page fetches
 	APIDelaySeconds     int    `mapstructure:"api_delay_seconds"`    // Delay between API calls
@@ -94,6 +95,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("api.limits.tag_max_limit", 25)
 	v.SetDefault("crawler.host", "e-hentai.org")
 	v.SetDefault("crawler.retry_times", 3)
+	v.SetDefault("crawler.transient_retry_times", 6)
 	v.SetDefault("crawler.wait_for_ip_unban", false)
 	v.SetDefault("crawler.page_delay_seconds", 1)
 	v.SetDefault("crawler.api_delay_seconds", 1)

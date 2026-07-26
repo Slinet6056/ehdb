@@ -14,6 +14,51 @@ var (
 	ErrAbnormalPage = errors.New("abnormal page response")
 )
 
+// TransientError indicates a temporary upstream failure (e.g. HTTP 5xx or 429)
+// that is likely to succeed on retry. It carries the originating status code and
+// an optional server-suggested wait duration parsed from the Retry-After header.
+type TransientError struct {
+	StatusCode int
+	RetryAfter time.Duration // zero when the server did not provide Retry-After
+}
+
+func (e *TransientError) Error() string {
+	if e == nil {
+		return "transient upstream error"
+	}
+
+	return fmt.Sprintf("unexpected status code: %d", e.StatusCode)
+}
+
+// asTransientError reports whether err (or anything it wraps) is a TransientError.
+func asTransientError(err error) (*TransientError, bool) {
+	if err == nil {
+		return nil, false
+	}
+
+	var te *TransientError
+	if errors.As(err, &te) {
+		return te, true
+	}
+
+	return nil, false
+}
+
+// isTransientStatusCode reports whether an HTTP status code represents a
+// temporary upstream condition worth retrying with backoff.
+func isTransientStatusCode(status int) bool {
+	switch status {
+	case 429, // Too Many Requests
+		500, // Internal Server Error
+		502, // Bad Gateway
+		503, // Service Unavailable
+		504: // Gateway Timeout
+		return true
+	default:
+		return false
+	}
+}
+
 type PartialBackfillError struct {
 	Cause           error
 	ImportedCount   int

@@ -504,9 +504,10 @@ func (c *GalleryCrawler) fetchMetadataForItems(items []GalleryListItem) ([]datab
 		c.logger.Debug("fetching metadata batch", zap.Int("from", i), zap.Int("to", end))
 
 		metadata, err := Retry(RetryConfig{
-			MaxRetries:     c.retryTimes,
-			Logger:         c.logger,
-			WaitForIPUnban: c.cfg.WaitForIPUnban,
+			MaxRetries:          c.retryTimes,
+			Logger:              c.logger,
+			TransientRetryTimes: c.cfg.TransientRetryTimes,
+			WaitForIPUnban:      c.cfg.WaitForIPUnban,
 		}, func() ([]database.GalleryMetadata, error) {
 			return c.GetMetadatas(gidlist)
 		})
@@ -614,9 +615,10 @@ func (c *GalleryCrawler) fetchPages(expunged bool, lastPosted int64, endPosted i
 		)
 
 		items, err := Retry(RetryConfig{
-			MaxRetries:     c.retryTimes,
-			Logger:         c.logger,
-			WaitForIPUnban: c.cfg.WaitForIPUnban,
+			MaxRetries:          c.retryTimes,
+			Logger:              c.logger,
+			TransientRetryTimes: c.cfg.TransientRetryTimes,
+			WaitForIPUnban:      c.cfg.WaitForIPUnban,
 		}, func() ([]GalleryListItem, error) {
 			return c.GetPages(next, expunged)
 		})
