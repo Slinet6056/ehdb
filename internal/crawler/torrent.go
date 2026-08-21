@@ -442,9 +442,9 @@ func (c *TorrentCrawler) parseTorrents(html []byte, gid int) []database.Torrent 
 		gtidStr := string(match[1])
 		posted := string(match[2])
 		size := string(match[3])
-		uploader := string(match[4])
+		uploader := sanitizeTorrentText(match[4])
 		hashStr := string(match[5])
-		name := string(match[6])
+		name := sanitizeTorrentText(match[6])
 
 		gtid, _ := strconv.Atoi(gtidStr)
 
@@ -461,6 +461,10 @@ func (c *TorrentCrawler) parseTorrents(html []byte, gid int) []database.Torrent 
 	}
 
 	return torrents
+}
+
+func sanitizeTorrentText(value []byte) string {
+	return strings.ToValidUTF8(string(value), "\uFFFD")
 }
 
 // importMissingGalleries imports galleries that don't exist in database

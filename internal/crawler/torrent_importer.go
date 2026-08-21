@@ -273,10 +273,10 @@ func (ti *TorrentImporter) parseTorrents(html []byte, gid int) []database.Torren
 		gtidStr := string(match[1])
 		posted := string(match[2])
 		size := string(match[3])
-		uploader := string(match[4])
+		uploader := sanitizeTorrentText(match[4])
 		hashStr := string(match[5])
 		expungedStr := string(match[6])
-		name := string(match[7])
+		name := sanitizeTorrentText(match[7])
 
 		gtid, _ := strconv.Atoi(gtidStr)
 		expunged := expungedStr != ""

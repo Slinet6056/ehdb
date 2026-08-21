@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/slinet/ehdb/internal/config"
 )
@@ -53,4 +54,25 @@ func TestBuildTorrentImportGalleryQuery(t *testing.T) {
 			t.Fatalf("expected end arg %s, got %s", time.Unix(cfg.BackfillEnd, 0).UTC(), endTime)
 		}
 	})
+}
+
+func TestTorrentImporterParseTorrentsSanitizesInvalidUTF8(t *testing.T) {
+	html := append([]byte(`name="gtid" value="2188462" Posted:<x>2026-08-21 10:00</x> Size:>1.0 MiB</x> Uploader:user`), 0xe3)
+	html = append(html, []byte(`</x> 0123456789abcdef0123456789abcdef01234567.torrent">bad`)...)
+	html = append(html, 0xe3)
+	html = append(html, []byte(`name</a></td></tr></table>`)...)
+
+	importer := &TorrentImporter{}
+	torrents := importer.parseTorrents(html, 4134857)
+	if len(torrents) != 1 {
+		t.Fatalf("expected one torrent, got %d", len(torrents))
+	}
+
+	torrent := torrents[0]
+	if !utf8.ValidString(torrent.Name) || torrent.Name != "bad\uFFFDname" {
+		t.Fatalf("expected sanitized torrent name, got %q", torrent.Name)
+	}
+	if !utf8.ValidString(torrent.Uploader) || torrent.Uploader != "user\uFFFD" {
+		t.Fatalf("expected sanitized uploader, got %q", torrent.Uploader)
+	}
 }
